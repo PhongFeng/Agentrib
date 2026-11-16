@@ -1,8 +1,10 @@
 # Agentrib
 
-Agentrib 是一个面向 **Godot 游戏开发**的 Agent 协作工具。在浏览器里编排策划、开发、测试和交付步骤，由执行机器上的 Runner 调用 Codex、Qoder CN 等本机 Agent。
+Agentrib 是一个面向 **Godot 游戏开发**的 Agent 协作工具。在浏览器里编排策划、开发、测试和交付，由执行机器上的 Runner 调用本机 Agent。首版默认用 Codex 分别执行开发和只读 QA。
 
 [项目官网](https://www.agentrib.com/)
+
+[部署与验收说明](docs/deployment.md)
 
 ## 首版范围
 
@@ -15,7 +17,7 @@ flowchart LR
     Web[浏览器控制台] --> Server[Go 控制面和工作流]
     Server --> Database[(PostgreSQL)]
     Runner[Go Runner] -->|HTTPS 心跳、领单、回传| Server
-    Runner --> Agents[Codex 与 Qoder CN]
+    Runner --> Agents[Codex 开发与只读 QA]
     Runner --> Godot[Godot 回放测试与 Web 导出]
     Agents --> Git[项目 Git 工作区]
     Godot --> Git
@@ -29,7 +31,7 @@ flowchart LR
 | --- | --- | --- |
 | 1. 项目说明与官网 | 明确 Godot 专用定位、更新 README 和官网 | 公开页面准确说明首版范围和进度 |
 | 2. 控制面 | Go API、PostgreSQL、机器注册、任务领取和事件记录 | 数据库重启后状态可恢复，重复领单和回传保持一致 |
-| 3. Mac Runner | HTTP 轮询、CLI 适配、Git 工作区、Godot 命令 | 真机探测并运行 Codex、Qoder CN，任务可取消，日志可追溯 |
+| 3. Mac Runner | HTTP 轮询、CLI 适配、Git 工作区、Godot 命令 | 真机运行 Codex 开发和只读 QA，任务可取消，日志可追溯 |
 | 4. 网页工作流 | 可编辑步骤和依赖，策划、制作人、开发、QA 角色绑定 | 从浏览器完成建流程、派单、查看结果和人工确认 |
 | 5. Godot 交付 | 关联 Git 提交、Godot 测试报告和 Web 导出包 | 验收版本与发布版本一致，10 关具有可重放记录 |
 | 6. 部署与验收 | 云端部署控制台、API 和数据库，Mac mini 部署 Runner | 跨机器验证真实 Agent、Godot、取消、断线恢复及交付链路 |
