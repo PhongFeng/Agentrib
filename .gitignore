@@ -1,0 +1,9 @@
+__pycache__/
+*.sqlite3*
+.env
+.agentrib/
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
