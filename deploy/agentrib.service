@@ -1,0 +1,25 @@
+[Unit]
+Description=Agentrib Godot workflow control plane
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=agentrib
+Group=agentrib
+StateDirectory=agentrib
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/agentrib
+EnvironmentFile=/etc/agentrib/server.env
+Environment=AGENTRIB_LISTEN=127.0.0.1:8765
+Environment=AGENTRIB_ARTIFACTS=/var/lib/agentrib/artifacts
+ExecStart=/opt/agentrib/bin/agentrib-server
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
