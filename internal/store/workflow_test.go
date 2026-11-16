@@ -64,15 +64,22 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		if step != "build" && job.Spec.Commit != sha {
 			t.Fatalf("step %s commit: %s", step, job.Spec.Commit)
 		}
-		if step == "review" && !strings.Contains(job.Spec.Prompt, "PASS 1/10") {
-			t.Fatal("Godot evidence was not handed to QA")
+		if step == "review" && (!strings.Contains(job.Spec.Prompt, "PASS 1/10") || strings.Contains(job.Spec.Prompt, "Export progress")) {
+			t.Fatal("QA should receive test evidence without the later export output")
 		}
 		if err := db.Start(ctx, machine, job.ID, job.Lease); err != nil {
 			t.Fatal(err)
 		}
 		report := protocol.Report{Lease: job.Lease, Result: &protocol.Result{Status: "succeeded", Detail: "complete", Commit: sha}}
 		if step == "test" {
-			report.Events = []protocol.Event{{Seq: 1, Kind: "godot", Text: "PASS 1/10"}}
+			report.Events = []protocol.Event{
+				{Seq: 1, Kind: "tool", Text: "godot --script res://test.gd"},
+				{Seq: 2, Kind: "godot", Text: "PASS 1/10"},
+				{Seq: 3, Kind: "tool", Text: "godot --export-release Web /tmp/index.html"},
+			}
+			for seq := 4; seq <= 30; seq++ {
+				report.Events = append(report.Events, protocol.Event{Seq: seq, Kind: "godot", Text: "Export progress"})
+			}
 		}
 		if _, err := db.Report(ctx, machine, job.ID, report); err != nil {
 			t.Fatal(err)

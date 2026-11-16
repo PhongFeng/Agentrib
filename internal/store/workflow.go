@@ -300,12 +300,19 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 					continue
 				}
 				var evidence string
-				if err := tx.QueryRow(ctx, `SELECT coalesce(string_agg(body,chr(10) ORDER BY seq),'') FROM (
-					SELECT seq,left(body,240) AS body FROM run_events WHERE run_id=$1 AND kind='godot' ORDER BY seq DESC LIMIT 16
+				if err := tx.QueryRow(ctx, `WITH test_start AS (
+					SELECT max(seq) AS seq FROM run_events WHERE run_id=$1 AND kind='tool' AND body LIKE 'godot --script %'
+				), test_end AS (
+					SELECT coalesce(min(e.seq),10001) AS seq FROM run_events e,test_start s
+					WHERE e.run_id=$1 AND e.kind='tool' AND e.seq>s.seq
+				)
+				SELECT coalesce(string_agg(body,chr(10) ORDER BY seq),'') FROM (
+					SELECT e.seq,left(e.body,240) AS body FROM run_events e,test_start s,test_end f
+					WHERE e.run_id=$1 AND e.kind='godot' AND e.seq>s.seq AND e.seq<f.seq ORDER BY e.seq DESC LIMIT 16
 				) AS lines`, prior.ID).Scan(&evidence); err != nil {
 					return err
 				}
-				spec.Prompt += "\n\nGodot test evidence (latest output):\n" + strings.TrimSpace(evidence)
+				spec.Prompt += "\n\nGodot test evidence (test script output):\n" + strings.TrimSpace(evidence)
 			}
 		}
 		digest := sha256.Sum256([]byte(e.ID + "/" + step.ID))
