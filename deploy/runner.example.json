@@ -1,0 +1,17 @@
+{
+  "server": "https://agentrib.example.org",
+  "state": "/Users/runner/.agentrib",
+  "token_file": "/Users/runner/.agentrib/runner.token",
+  "commands": {
+    "codex": "/Users/runner/.local/bin/codex",
+    "qoder-cn": "/Users/runner/.local/bin/qodercn",
+    "godot": "/Applications/Godot.app/Contents/MacOS/Godot"
+  },
+  "projects": {
+    "moon-power": {
+      "repository": "/Users/runner/projects/moon-power",
+      "test_script": "tests/run.gd",
+      "web_preset": "Web"
+    }
+  }
+}
