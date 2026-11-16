@@ -120,6 +120,18 @@ export default function Console() {
 
   function selectRun(id: string) { setRun(undefined); setEvents([]); setRunID(id); }
 
+  async function downloadArtifact(id: string, name: string) {
+    const response = await fetch(`/api/v1/runs/${id}/artifacts/${encodeURIComponent(name)}`, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!response.ok) throw new Error(`无法下载 ${name}`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url; link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function updateStep(index: number, change: Partial<Step>) {
     setDraft(current => current && { ...current, steps: current.steps.map((step, i) => i === index ? { ...step, ...change } : step) });
   }
@@ -197,7 +209,7 @@ export default function Console() {
           })}</ol></>}
           {run && <article className="run-detail"><div className="line"><h3>{run.spec.title} · {label[run.status] || run.status}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
             {run.result && <p>{run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
-            {run.result?.artifacts?.length ? <ul>{run.result.artifacts.map(item => <li key={item.name}>{item.name} · {Math.ceil(item.bytes / 1024)} KB</li>)}</ul> : null}
+            {run.result?.artifacts?.length ? <ul>{run.result.artifacts.map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul> : null}
             <pre className="log" aria-label="执行日志">{events.length ? events.map(event => `[${event.kind}] ${event.text}`).join('\n') : '等待执行日志…'}</pre>
           </article>}
         </section>

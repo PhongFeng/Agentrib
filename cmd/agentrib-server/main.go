@@ -32,6 +32,13 @@ func run() error {
 	if addr == "" {
 		addr = "127.0.0.1:8765"
 	}
+	artifacts := os.Getenv("AGENTRIB_ARTIFACTS")
+	if artifacts == "" {
+		artifacts = ".agentrib/artifacts"
+	}
+	if err := os.MkdirAll(artifacts, 0700); err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	openCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
@@ -41,7 +48,7 @@ func run() error {
 		return err
 	}
 	defer db.Close()
-	server := &http.Server{Addr: addr, Handler: control.New(db, operator), ReadHeaderTimeout: 5 * time.Second,
+	server := &http.Server{Addr: addr, Handler: control.New(db, operator, artifacts), ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 32 << 10}
 	go sweep(ctx, db)
 	go func() {

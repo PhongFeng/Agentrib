@@ -56,6 +56,13 @@ func (s *Store) Close() { s.db.Close() }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.Ping(ctx) }
 
+func (s *Store) ArtifactAllowed(ctx context.Context, machine, id, lease string) (bool, error) {
+	var allowed bool
+	err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE machine_id=$1 AND id=$2 AND lease=$3
+		AND status='running' AND lease_expires>now())`, machine, id, lease).Scan(&allowed)
+	return allowed, err
+}
+
 func newID() (string, error) {
 	var value [16]byte
 	_, err := rand.Read(value[:])
