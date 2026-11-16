@@ -1,0 +1,9 @@
+import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+import './style.css';
+
+export const metadata: Metadata = { title: 'Agentrib · Godot 制作控制台' };
+
+export default function Layout({ children }: { children: ReactNode }) {
+  return <html lang="zh-CN"><body>{children}</body></html>;
+}

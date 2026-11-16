@@ -46,7 +46,7 @@ func prepare(ctx context.Context, tx pgx.Tx) error {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(483739118)`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, schema); err != nil {
+	if _, err := tx.Exec(ctx, schema+workflowSchema); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

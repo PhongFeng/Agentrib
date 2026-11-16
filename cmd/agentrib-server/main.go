@@ -59,7 +59,7 @@ func run() error {
 }
 
 func sweep(ctx context.Context, db *store.Store) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -69,6 +69,9 @@ func sweep(ctx context.Context, db *store.Store) {
 			check, cancel := context.WithTimeout(ctx, 8*time.Second)
 			if err := db.Sweep(check); err != nil && ctx.Err() == nil {
 				slog.Error("sweep expired leases", "error", err)
+			}
+			if err := db.Schedule(check); err != nil && ctx.Err() == nil {
+				slog.Error("advance workflows", "error", err)
 			}
 			cancel()
 		}
