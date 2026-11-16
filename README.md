@@ -2,7 +2,7 @@
 
 Agentrib 是一个面向 **Godot 游戏开发**的 Agent 协作工具。在浏览器里编排策划、开发、测试和交付，由执行机器上的 Runner 调用本机 Agent。首版默认用 Codex 分别执行开发和只读 QA。
 
-[项目官网](https://www.agentrib.com/)
+[项目官网](https://www.agentrib.com/) · [浏览器控制台](https://www.agentrib.com/console/)
 
 [部署与验收说明](docs/deployment.md)
 
