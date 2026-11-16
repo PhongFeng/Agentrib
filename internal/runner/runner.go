@@ -9,6 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +37,7 @@ type Runner struct {
 
 var errLease = errors.New("run lease no longer active")
 var errToken = errors.New("runner token rejected")
+var runID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 func New(cfg Config) *Runner {
 	return &Runner{cfg: cfg, client: &http.Client{Timeout: 8 * time.Second,
@@ -86,10 +90,10 @@ func (r *Runner) post(ctx context.Context, path string, body, target any) error 
 	if err != nil {
 		return err
 	}
-	return r.request(ctx, http.MethodPost, path, "application/json", bytes.NewReader(data), int64(len(data)), target)
+	return r.request(ctx, http.MethodPost, path, "application/json", bytes.NewReader(data), int64(len(data)), nil, target)
 }
 
-func (r *Runner) request(ctx context.Context, method, path, contentType string, body io.Reader, length int64, target any) error {
+func (r *Runner) request(ctx context.Context, method, path, contentType string, body io.Reader, length int64, headers map[string]string, target any) error {
 	req, err := http.NewRequestWithContext(ctx, method, r.cfg.Server+"/api/v1/runner"+path, body)
 	if err != nil {
 		return err
@@ -97,7 +101,16 @@ func (r *Runner) request(ctx context.Context, method, path, contentType string, 
 	req.ContentLength = length
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Authorization", "Bearer "+r.cfg.token)
-	resp, err := r.client.Do(req)
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+	client := r.client
+	if method == http.MethodPut {
+		long := *client
+		long.Timeout = 3 * time.Minute
+		client = &long
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -115,6 +128,33 @@ func (r *Runner) request(ctx context.Context, method, path, contentType string, 
 		return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(target)
 	}
 	_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	return err
+}
+
+func (r *Runner) uploadArtifacts(ctx context.Context, job protocol.Run, result *protocol.Result) error {
+	files := result.Artifacts
+	result.Artifacts = nil
+	for _, artifact := range files {
+		if err := r.uploadArtifact(ctx, job, artifact); err != nil {
+			return fmt.Errorf("upload %s: %w", artifact.Name, err)
+		}
+		result.Artifacts = append(result.Artifacts, artifact)
+	}
+	return nil
+}
+
+func (r *Runner) uploadArtifact(ctx context.Context, job protocol.Run, artifact protocol.Artifact) error {
+	file, err := os.Open(filepath.Join(r.cfg.State, "artifacts", job.ID, artifact.Name))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	headers := map[string]string{"X-Agentrib-Lease": job.Lease, "X-Agentrib-Sha256": artifact.Digest}
+	var uploaded protocol.Artifact
+	err = r.request(ctx, http.MethodPut, "/runs/"+job.ID+"/artifacts/"+artifact.Name, "application/octet-stream", file, artifact.Bytes, headers, &uploaded)
+	if err == nil && uploaded != artifact {
+		err = errors.New("artifact confirmation does not match")
+	}
 	return err
 }
 
@@ -179,7 +219,7 @@ func sleep(ctx context.Context, duration time.Duration) {
 }
 
 func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
-	if !isID(job.ID) || !isID(job.Lease) {
+	if !runID.MatchString(job.ID) || !runID.MatchString(job.Lease) {
 		return
 	}
 	path := "/runs/" + job.ID
@@ -201,6 +241,7 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 	go func() {
 		logs.add("status", "Runner started "+job.Spec.Executor)
 		result, err := r.work(worker, job, logs.add)
+		err = errors.Join(err, r.uploadArtifacts(worker, job, &result))
 		switch {
 		case errors.Is(worker.Err(), context.Canceled):
 			result.Status, result.Detail = "canceled", "Process stopped"
@@ -259,10 +300,6 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 			sleep(ctx, reportPeriod)
 		}
 	}
-}
-
-func isID(value string) bool {
-	return len(value) == 32 && runnerToken.MatchString(value+value)
 }
 
 type eventBuffer struct {

@@ -26,12 +26,13 @@ var (
 )
 
 type API struct {
-	store    *store.Store
-	operator [32]byte
+	store     *store.Store
+	operator  [32]byte
+	artifacts string
 }
 
-func New(db *store.Store, operatorToken string) http.Handler {
-	a := &API{store: db, operator: sha256.Sum256([]byte(operatorToken))}
+func New(db *store.Store, operatorToken, artifacts string) http.Handler {
+	a := &API{store: db, operator: sha256.Sum256([]byte(operatorToken)), artifacts: artifacts}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/machines", a.asOperator(a.machines))
@@ -40,6 +41,7 @@ func New(db *store.Store, operatorToken string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs", a.asOperator(a.createRun))
 	mux.HandleFunc("GET /api/v1/runs/{id}", a.asOperator(a.run))
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
+	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.download))
 	mux.HandleFunc("GET /api/v1/workflows", a.asOperator(a.workflows))
 	mux.HandleFunc("GET /api/v1/workflows/template", a.asOperator(a.template))
 	mux.HandleFunc("POST /api/v1/workflows", a.asOperator(a.saveWorkflow))
@@ -51,6 +53,7 @@ func New(db *store.Store, operatorToken string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runner/claim", a.asRunner(a.claim))
 	mux.HandleFunc("POST /api/v1/runner/runs/{id}/start", a.asRunner(a.start))
 	mux.HandleFunc("POST /api/v1/runner/runs/{id}/report", a.asRunner(a.report))
+	mux.HandleFunc("PUT /api/v1/runner/runs/{id}/artifacts/{name}", a.asRunner(a.upload))
 	return mux
 }
 
@@ -279,7 +282,16 @@ func (a *API) report(w http.ResponseWriter, r *http.Request, machine string) {
 			return
 		}
 	}
-	reply, err := a.store.Report(r.Context(), machine, r.PathValue("id"), report)
+	id := r.PathValue("id")
+	if report.Result != nil {
+		for _, artifact := range report.Result.Artifacts {
+			if !a.artifactExists(id, artifact) {
+				problem(w, http.StatusBadRequest, "Artifact has not been uploaded")
+				return
+			}
+		}
+	}
+	reply, err := a.store.Report(r.Context(), machine, id, report)
 	response(w, http.StatusOK, reply, err)
 }
 
@@ -294,7 +306,7 @@ func validResult(result *protocol.Result) bool {
 		return false
 	}
 	for _, artifact := range result.Artifacts {
-		if !validText(artifact.Name, 180) || strings.ContainsAny(artifact.Name, `/\`) || !shaPattern.MatchString(artifact.Digest) || artifact.Bytes < 1 {
+		if !validArtifact(artifact.Name) || !shaPattern.MatchString(artifact.Digest) || artifact.Bytes < 1 || artifact.Bytes > maxArtifact {
 			return false
 		}
 	}

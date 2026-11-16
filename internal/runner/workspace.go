@@ -95,7 +95,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	if run.Spec.ReadOnly {
 		mode = "Review the checked-out version. Do not change source files. Report findings and the evidence you used."
 	}
-	prompt := "This is an Agentrib Godot game task. " + mode + " Do not push or publish.\n\n" + run.Spec.Prompt
+	prompt := "This is an Agentrib Godot game task. " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
 	if err := backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit); err != nil {
 		return result, err
 	}
@@ -104,7 +104,11 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		return result, err
 	}
 	if run.Spec.ReadOnly {
-		if changes != "" {
+		head, err := git(ctx, checkout, "rev-parse", "HEAD")
+		if err != nil {
+			return result, err
+		}
+		if changes != "" || head != base {
 			return result, errors.New("read-only step wrote to the checkout")
 		}
 		return result, nil
