@@ -2,7 +2,7 @@
 
 Agentrib 是一个面向**游戏开发**的 Agent 协作工具。在控制台设计工作流，在流程中选择引擎、指派 Agent 并设置步骤依赖。Agentrib 把任务派到已接入的执行机器，后续步骤可以接续上游的 Git 提交。
 
-[项目官网](https://www.agentrib.com/) · [控制台](https://www.agentrib.com/console/)
+[项目官网](https://www.agentrib.com/)
 
 [部署与验收说明](docs/deployment.md)
 
@@ -16,8 +16,6 @@ Agentrib 是一个面向**游戏开发**的 Agent 协作工具。在控制台设
 | <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unreal-white.png"><img src="site/engines/unreal.png" alt="" width="32"></picture> **Unreal Engine** | 计划接入 | `.uproject` 与 `Source/`。面向 C++ 与蓝图工作流。 |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unity-white.svg"><img src="site/engines/unity.svg" alt="" width="32"></picture> **Unity** | 计划接入 | `Assets/` 与 `Packages/`。面向 C# 工作流。 |
 | <img src="site/engines/cocos-creator.png" alt="" width="32"> **Cocos Creator** | 计划接入 | `assets/` 与 `package.json`。面向 TypeScript 工作流。 |
-
-图标来源见 [Godot Press Kit](https://godotengine.org/press/)（CC BY 4.0）、[Epic Games 品牌资源](https://www.unrealengine.com/en-US/branding)、[Unity 品牌指南](https://unity.com/legal/branding-trademarks)和 [Cocos Creator 文档](https://docs.cocos.com/creator/3.8/manual/en/)。
 
 ## Agent CLI
 
