@@ -33,15 +33,40 @@
     .engine-status { color: var(--muted); font-size: 13px; }
     .engine-status.ready { color: var(--mint); }
     .engine-description { margin-top: 8px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+    .project-list {
+      display: grid;
+      gap: 20px;
+      list-style: none;
+      padding: 0;
+      margin: 24px 0 0;
+    }
+    .project-card {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      align-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+    .project-card img {
+      width: 100%;
+      height: auto;
+    }
+    .project-content { padding: clamp(20px, 4vw, 48px); }
+    .project-content h3 { font-size: clamp(22px, 3vw, 32px); }
+    .project-content p { margin-top: 6px; color: var(--muted); }
+    .projects-note { margin-top: 18px; color: var(--muted); font-size: 14px; }
+    @media (max-width: 620px) { .project-card { grid-template-columns: minmax(0, 1fr); } }
     @media (max-width: 890px) { .engine-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 470px) { .engine-list { grid-template-columns: 1fr; } }
     :root{color-scheme:dark;--bg:#080d17;--panel:#111a2a;--line:#26344b;--ink:#f0f5fd;--muted:#a2aec3;--mint:#65e1c7;--blue:#90b5ff;--max:1140px;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.65}a{color:inherit;text-decoration:none}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}img{display:block}h1,h2,h3,p{margin:0}::selection{background:#65e1c7;color:#080d17}
     .wrap{width:min(var(--max),calc(100% - 80px));margin-inline:auto}.header{border-bottom:1px solid #1b283b}.nav{min-height:68px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:inline-flex;align-items:center;gap:10px;font-size:22px;font-weight:750;letter-spacing:-.045em}.brand img{width:36px;height:24px}.brand strong{color:var(--mint);font-weight:inherit}.nav-links{display:flex;align-items:center;gap:27px;font-size:14px;color:var(--muted)}.nav-links a:hover,.foot a:hover{color:var(--mint)}.nav-links .repo{color:var(--ink)}
-    .hero{background:radial-gradient(ellipse at 78% 37%,#182641 0,transparent 54%);border-bottom:1px solid #1b283b}.hero-inner{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center;padding-block:96px 102px}.eyebrow{color:var(--mint);font-size:13px;font-weight:690;letter-spacing:.09em}.hero h1{font-size:clamp(39px,4.6vw,65px);line-height:1.18;letter-spacing:-.045em;margin:15px 0 25px}.hero h1 span{display:block;color:var(--mint)}.hero .lead{color:var(--muted);font-size:17px;max-width:32em}.actions{margin-top:31px;display:flex;gap:12px;flex-wrap:wrap}.button{display:inline-flex;min-height:44px;align-items:center;justify-content:center;border-radius:8px;padding:9px 17px;font-size:14px;font-weight:680;border:1px solid var(--line)}.button.primary{background:var(--mint);border-color:var(--mint);color:#071b1b}.button.primary:hover{background:#a0f4e3}.button.secondary:hover{border-color:var(--mint)}
+    .hero{background:radial-gradient(ellipse at 78% 37%,#182641 0,transparent 54%);border-bottom:1px solid #1b283b}.hero-inner{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center;padding-block:96px 102px}.hero h1{font-size:clamp(39px,4.6vw,65px);line-height:1.18;letter-spacing:-.045em;margin:15px 0 25px}.hero h1 span{display:block;color:var(--mint)}.hero .lead{color:var(--muted);font-size:17px;max-width:32em}.actions{margin-top:31px;display:flex;gap:12px;flex-wrap:wrap}.button{display:inline-flex;min-height:44px;align-items:center;justify-content:center;border-radius:8px;padding:9px 17px;font-size:14px;font-weight:680;border:1px solid var(--line)}.button.primary{background:var(--mint);border-color:var(--mint);color:#071b1b}.button.primary:hover{background:#a0f4e3}.button.secondary:hover{border-color:var(--mint)}
     .board{border:1px solid #34435d;border-radius:18px;background:linear-gradient(145deg,#151f34,#0d1624 74%);box-shadow:0 26px 88px #02050a66;overflow:hidden}.board-head{padding:15px 21px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);font-size:13px;font-weight:650}.board-head small{color:var(--muted);font-size:12px;font-weight:500}.board-body{padding:20px 20px 23px}.board-body h2{font-size:21px;margin-bottom:17px;letter-spacing:-.025em}.jobs{list-style:none;padding:0;margin:0;display:grid;gap:8px}.job{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:11px;padding:9px 12px;border:1px solid #28364b;border-radius:8px;background:#0c1422}.job b{font-size:14px}.job span:last-child{color:var(--muted);font-size:12px;text-align:right}.job .mark{width:27px;height:27px;display:grid;place-items:center;border-radius:6px;background:#1e304a;color:var(--blue);font-size:11px;font-family:ui-monospace,monospace}.job:last-child .mark{background:#19383a;color:var(--mint)}.board-foot{color:var(--muted);font-size:12px;margin-top:16px}
-    .section{padding-block:69px;border-bottom:1px solid #1b283b;scroll-margin-top:24px}.section h2{font-size:clamp(28px,3.2vw,41px);line-height:1.28;letter-spacing:-.035em;margin:10px 0 16px}.section .lead,.steps p,.proof p{color:var(--muted)}.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:0;margin:30px 0 0;list-style:none;border-block:1px solid var(--line)}.steps li{padding:22px 22px 24px 0}.steps li+li{border-left:1px solid var(--line);padding-left:22px}.steps h3{font-size:17px;margin-bottom:8px}.steps p,.proof p{font-size:14px}.validation{display:grid;grid-template-columns:1fr 1fr;gap:50px;align-items:center}.proof{padding:26px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}.proof h3{font-size:16px;margin:0 0 8px}.proof ul{margin:12px 0 0;padding-left:20px;color:var(--muted);font-size:14px}.proof li+li{margin-top:7px}.proof li::marker{color:var(--mint)}.foot{display:flex;justify-content:space-between;gap:24px;align-items:center;padding-block:26px;color:var(--muted);font-size:13px}.foot .brand{font-size:18px;color:var(--ink)}.foot .brand img{width:29px}.foot-links{display:flex;gap:21px;flex-wrap:wrap}
-    @media(max-width:890px){.wrap{width:calc(100% - 48px)}.hero-inner{gap:27px;padding-block:73px}.hero .lead{font-size:15px}.validation{gap:30px}}@media(max-width:720px){.hero-inner,.validation{grid-template-columns:1fr}.hero-inner{padding-block:58px;gap:31px}.hero h1{margin-bottom:17px}.section{padding-block:47px}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li:nth-child(3){border-left:0;padding-left:0}.steps li:nth-child(n+3){border-top:1px solid var(--line)}}@media(max-width:470px){.wrap{width:calc(100% - 32px)}.nav{min-height:57px}.nav-links{gap:14px;font-size:12px}.nav-links a:first-child{display:none}.hero-inner{padding-block:43px}.hero h1{font-size:38px}.board-body{padding:15px}.job{gap:6px;padding:8px;grid-template-columns:26px 1fr auto}.job .mark{width:23px;height:23px}.job b{font-size:13px}.job span:last-child{font-size:11px}.steps li,.steps li+li{padding-right:10px}.steps li:nth-child(even){padding-left:11px}.foot{align-items:flex-start}.foot-links{gap:10px 13px;justify-content:flex-end}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+    .section{padding-block:69px;border-bottom:1px solid #1b283b;scroll-margin-top:24px}.section h2{font-size:clamp(28px,3.2vw,41px);line-height:1.28;letter-spacing:-.035em;margin:10px 0 16px}.section .lead,.steps p{color:var(--muted)}.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:0;margin:30px 0 0;list-style:none;border-block:1px solid var(--line)}.steps li{padding:22px 22px 24px 0}.steps li+li{border-left:1px solid var(--line);padding-left:22px}.steps h3{font-size:17px;margin-bottom:8px}.steps p{font-size:14px}.foot{display:flex;justify-content:space-between;gap:24px;align-items:center;padding-block:26px;color:var(--muted);font-size:13px}.foot .brand{font-size:18px;color:var(--ink)}.foot .brand img{width:29px}.foot-links{display:flex;gap:21px;flex-wrap:wrap}
+    @media(max-width:890px){.wrap{width:calc(100% - 48px)}.hero-inner{gap:27px;padding-block:73px}.hero .lead{font-size:15px}}@media(max-width:720px){.hero-inner{grid-template-columns:1fr;padding-block:58px;gap:31px}.hero h1{margin-bottom:17px}.section{padding-block:47px}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li:nth-child(3){border-left:0;padding-left:0}.steps li:nth-child(n+3){border-top:1px solid var(--line)}}@media(max-width:470px){.wrap{width:calc(100% - 32px)}.nav{min-height:57px}.nav-links{gap:14px;font-size:12px}.nav-links a:first-child{display:none}.hero-inner{padding-block:43px}.hero h1{font-size:38px}.board-body{padding:15px}.job{gap:6px;padding:8px;grid-template-columns:26px 1fr auto}.job .mark{width:23px;height:23px}.job b{font-size:13px}.job span:last-child{font-size:11px}.steps li,.steps li+li{padding-right:10px}.steps li:nth-child(even){padding-left:11px}.foot{align-items:flex-start}.foot-links{gap:10px 13px;justify-content:flex-end}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
   </style>
 </head>
 <body>
@@ -61,12 +86,11 @@
     <section class="hero" aria-labelledby="intro-title">
       <div class="hero-inner wrap">
         <div>
-          <p class="eyebrow">开源项目 · 首版已部署</p>
           <h1 id="intro-title">用 AI Agent 协作<span>开发游戏</span></h1>
           <p class="lead">在浏览器选择游戏引擎，编排界面生成、玩法开发、测试与交付。Agentrib 将任务派给本机 Agent，并把日志、Git 提交和构建产物汇集到同一条工作流。</p>
           <div class="actions">
             <a class="button primary" href="/console/">打开控制台 →</a>
-            <a class="button secondary" href="#workflow">查看制作流程</a>
+            <a class="button secondary" href="#projects">查看游戏作品</a>
           </div>
         </div>
 
@@ -84,6 +108,24 @@
             <p class="board-foot">从开发提交追溯到测试证据和试玩版本。</p>
           </div>
         </section>
+      </div>
+    </section>
+
+    <section class="section" id="projects" aria-labelledby="projects-title">
+      <div class="wrap">
+        <h2 id="projects-title">游戏作品</h2>
+        <ul class="project-list">
+          <li>
+            <article class="project-card">
+              <img src="./projects/moon-power.png" alt="《月面送电》的月面棋盘、能量箱与供电节点" width="1260" height="820" loading="lazy" decoding="async">
+              <div class="project-content">
+                <h3>《月面送电》</h3>
+                <p>10 关 2D 推箱解谜。把能量箱推到供电节点，逐步点亮月面基地。</p>
+              </div>
+            </article>
+          </li>
+        </ul>
+        <p class="projects-note">更多作品将陆续展示。已发布的版本会在这里提供网页入口或客户端下载链接。</p>
       </div>
     </section>
 
@@ -155,24 +197,6 @@
           <li>MiniMax Code <code>mcode</code></li>
           <li>ZCode <code>zcode</code></li>
         </ul>
-      </div>
-    </section>
-
-    <section class="section" id="validation" aria-labelledby="validation-title">
-      <div class="wrap validation">
-        <div>
-          <p class="eyebrow">首个验收项目</p>
-          <h2 id="validation-title">《月面送电》</h2>
-          <p class="lead">一款规划中的 10 关 2D 休闲解谜游戏。把能量箱推到供电节点，逐步点亮月面基地。</p>
-        </div>
-        <div class="proof">
-          <h3>交付验收</h3>
-          <ul>
-            <li>10 个固定关卡都可在 Godot 中重放通关。</li>
-            <li>开发提交、QA 记录和 Web 试玩包对应同一版本。</li>
-            <li>浏览器可以追踪任务状态、日志和测试报告。</li>
-          </ul>
-        </div>
       </div>
     </section>
   </main>
