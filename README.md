@@ -1,8 +1,8 @@
 # Agentrib
 
-Agentrib 是一个面向**游戏开发**的 Agent 协作工具。为工作流选择引擎，再为产品文档、界面、玩法和验收等步骤分别选择 Agent。设置步骤依赖和提交来源后，下游步骤可以直接接续上游的 Git 提交。
+Agentrib 是一个面向**游戏开发**的 Agent 协作工具。在控制台设计工作流，在流程中选择引擎、指派 Agent 并设置步骤依赖。Agentrib 把任务派到已接入的执行机器，后续步骤可以接续上游的 Git 提交。
 
-[项目官网](https://www.agentrib.com/) · [浏览器控制台](https://www.agentrib.com/console/)
+[项目官网](https://www.agentrib.com/) · [控制台](https://www.agentrib.com/console/)
 
 [部署与验收说明](docs/deployment.md)
 
@@ -36,12 +36,12 @@ Agentrib 是一个面向**游戏开发**的 Agent 协作工具。为工作流选
 
 ## 项目架构
 
-- **入口**　浏览器控制台，可编辑工作流、绑定 Agent、派单、查看日志和确认交付。
+- **入口**　控制台可编辑工作流、绑定 Agent、派单、查看日志和确认交付。目前提供 Web 版，计划推出客户端。
 - **执行**　Go Runner 通过 HTTPS 向 Go 控制面上报本机项目和引擎能力。控制面将引擎选择随工作流版本保存在 PostgreSQL，Runner 在独立 Git 工作区调用对应适配器。
 
 ```mermaid
 flowchart LR
-    Web[浏览器控制台] --> Server[Go 控制面和工作流]
+    Console[控制台] --> Server[Go 控制面和工作流]
     Server --> Database[(PostgreSQL)]
     Runner[Go Runner] -->|HTTPS 心跳、领单、回传| Server
     Runner --> Agents[工作流指定的 Agent CLI]
@@ -61,7 +61,7 @@ flowchart LR
 | 1. 项目说明与官网 | 更新 Agent 和引擎支持说明 | 公开页面准确说明支持范围和进度 |
 | 2. 控制面 | Go API、PostgreSQL、机器注册、任务领取和事件记录 | 数据库重启后状态可恢复，重复领单和回传保持一致 |
 | 3. Mac Runner | HTTP 轮询、CLI 适配、Git 工作区、Godot 命令 | 真机运行界面生成、开发和只读 QA，任务可取消，日志可追溯 |
-| 4. 网页工作流 | 可编辑步骤和依赖，策划、制作人、开发、QA 角色绑定 | 从浏览器完成建流程、派单、查看结果和人工确认 |
+| 4. 工作流编辑 | 可编辑步骤和依赖，策划、制作人、开发、QA 角色绑定 | 在控制台创建工作流、派单、查看结果和人工确认 |
 | 5. Godot 交付 | 关联 Git 提交、Godot 测试报告和 Web 导出包 | 测试、QA 与导出包对应同一 Git 提交 |
 | 6. 部署与验收 | 云端部署控制台、API 和数据库，Mac mini 部署 Runner | 跨机器验证真实 Agent、Godot、取消、断线恢复及交付链路 |
 
