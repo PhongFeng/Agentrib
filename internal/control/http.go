@@ -43,6 +43,9 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
 	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.download))
 	mux.HandleFunc("GET /api/v1/workflows", a.asOperator(a.workflows))
+	mux.HandleFunc("GET /api/v1/agents", a.asOperator(func(w http.ResponseWriter, _ *http.Request) {
+		send(w, http.StatusOK, protocol.Agents)
+	}))
 	mux.HandleFunc("GET /api/v1/engines", a.asOperator(func(w http.ResponseWriter, _ *http.Request) {
 		send(w, http.StatusOK, protocol.Engines)
 	}))
@@ -79,7 +82,7 @@ func response(w http.ResponseWriter, status int, value any, err error) {
 		send(w, status, value)
 	case errors.Is(err, store.ErrConflict):
 		problem(w, http.StatusConflict, "Run state or lease changed")
-	case errors.Is(err, store.ErrEngineUnavailable), errors.Is(err, store.ErrProjectEngine):
+	case errors.Is(err, store.ErrEngineUnavailable), errors.Is(err, store.ErrProjectEngine), errors.Is(err, store.ErrAgentUnavailable):
 		problem(w, http.StatusConflict, err.Error())
 	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == "23503":
 		problem(w, http.StatusNotFound, "Record not found")
@@ -183,11 +186,12 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 
 func validSpec(spec protocol.Spec) bool {
 	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
+	agent, usesAgent := protocol.FindAgent(spec.Executor)
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
-		known && engine.Implemented && (agentExecutor(spec.Executor) || spec.Executor == engine.ID) &&
-		(!spec.ReadOnly || spec.Executor != "minimax-code") &&
+		known && engine.Implemented && (usesAgent || spec.Executor == engine.ID) &&
+		(!spec.ReadOnly || agent.ReadOnly) &&
 		validText(spec.Title, 200) && len(spec.Prompt) <= 16000 && !strings.ContainsRune(spec.Prompt, 0) &&
-		(!agentExecutor(spec.Executor) || validText(spec.Prompt, 16000)) && (spec.Commit == "" || commitPattern.MatchString(spec.Commit))
+		(!usesAgent || validText(spec.Prompt, 16000)) && (spec.Commit == "" || commitPattern.MatchString(spec.Commit))
 }
 
 func validText(s string, max int) bool {
@@ -196,11 +200,8 @@ func validText(s string, max int) bool {
 
 func validExecutor(key string) bool {
 	engine, ok := protocol.FindEngine(key)
-	return agentExecutor(key) || ok && engine.Implemented
-}
-
-func agentExecutor(key string) bool {
-	return key == "codex" || key == "qoder-cn" || key == "minimax-code"
+	_, agent := protocol.FindAgent(key)
+	return agent || ok && engine.Implemented
 }
 
 func (a *API) runs(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +239,7 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 	if !read(w, r, &h) {
 		return
 	}
-	if len(h.Executors) > 3+len(protocol.Engines) || len(h.Projects) > 64 || len(h.ProjectEngines) > len(h.Projects) {
+	if len(h.Executors) > len(protocol.Agents)+len(protocol.Engines) || len(h.Projects) > 64 || len(h.ProjectEngines) > len(h.Projects) {
 		problem(w, http.StatusBadRequest, "Heartbeat too large")
 		return
 	}

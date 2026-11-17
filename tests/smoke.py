@@ -68,13 +68,16 @@ def smoke(api, machine, project):
     workflow.update(id="acceptance-" + uuid4().hex[:8], name="Mac deployment acceptance")
     for step in workflow["steps"]:
         if step["id"] == "ui":
+            step["executor"] = "minimax-code"
             step["prompt"] = ("This is a disposable fixture. Create only ui_handoff.tscn with a valid Godot 4 Label root "
                               "and the exact label text AGENTRIB_UI_HANDOFF. Use a file-writing tool. Keep main.tscn unchanged.")
         if step["id"] == "build":
+            step["executor"] = "codex"
             step["prompt"] = ("Read ui_handoff.tscn from the prior step and verify it is a Godot Label with text AGENTRIB_UI_HANDOFF. "
                               "Instance that scene in the existing main.tscn. Create qa_marker.txt with the exact content "
                               "AGENTRIB_ACCEPTANCE followed by a newline. Edit only main.tscn and qa_marker.txt.")
         if step["id"] == "qa":
+            step["executor"] = "qoder-cn"
             step["prompt"] = ("Read main.tscn, ui_handoff.tscn and qa_marker.txt in the checkout. Verify the UI scene is instanced, "
                               "its label says AGENTRIB_UI_HANDOFF, the marker says AGENTRIB_ACCEPTANCE, and the provided Godot "
                               "evidence contains the headless PASS result. Return exactly ACCEPTANCE_QA_PASS if all pass, "

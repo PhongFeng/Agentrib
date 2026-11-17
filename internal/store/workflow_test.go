@@ -47,6 +47,19 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 	if _, err := db.StartExecution(ctx, blocked); !errors.Is(err, ErrProjectEngine) {
 		t.Fatalf("execution accepted without matching project: %v", err)
 	}
+	missing := w
+	missing.ID, missing.Version = "missing-agent", 0
+	missing.Steps = append([]protocol.Step(nil), w.Steps...)
+	missing.Steps[1].Executor = "deepseek-harness"
+	missing, err = db.SaveWorkflow(ctx, missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked = input
+	blocked.WorkflowID, blocked.Version = missing.ID, missing.Version
+	if _, err := db.StartExecution(ctx, blocked); !errors.Is(err, ErrAgentUnavailable) {
+		t.Fatalf("execution accepted without its selected Agent: %v", err)
+	}
 	if _, err := db.StartExecution(ctx, input); err != nil {
 		t.Fatal(err)
 	}
