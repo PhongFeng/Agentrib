@@ -2,15 +2,16 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 
-type Machine = { id: string; name: string; executors: string[]; projects: string[]; seen: string };
+type Machine = { id: string; name: string; executors: string[]; projects: string[]; project_engines?: Record<string, string>; seen: string };
+type Engine = { id: string; name: string; implemented: boolean };
 type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string };
-type Workflow = { id: string; version: number; name: string; steps: Step[] };
+type Workflow = { id: string; version: number; name: string; engine?: string; steps: Step[] };
 type Artifact = { name: string; sha256: string; bytes: number };
 type Run = { id: string; step_id?: string; status: string; spec: { title: string; executor: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[] } };
 type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[] };
 type RunEvent = { seq: number; kind: string; text: string };
 
-const executors: Record<string, string> = { approval: '人工确认', 'minimax-code': 'MiniMax Code', codex: 'Codex', 'qoder-cn': 'Qoder CN', godot: 'Godot' };
+const executors: Record<string, string> = { approval: '人工确认', 'minimax-code': 'MiniMax Code', codex: 'Codex', 'qoder-cn': 'Qoder CN', engine: '引擎测试与导出' };
 const label: Record<string, string> = { queued: '排队', claimed: '已领取', running: '运行中', canceling: '取消中', failed: '失败', lost: '失联', canceled: '已取消', succeeded: '已通过', waiting: '等待依赖', ready: '等待确认' };
 
 function newID() { return crypto.randomUUID().replaceAll('-', ''); }
@@ -32,6 +33,7 @@ export default function Console() {
   const [inputToken, setInputToken] = useState('');
   const [notice, setNotice] = useState('');
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [engines, setEngines] = useState<Engine[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
   const [machine, setMachine] = useState('');
@@ -56,12 +58,12 @@ export default function Console() {
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const [m, w, e, detail] = await Promise.all([
-          api<Machine[]>(token, '/machines'), api<Workflow[]>(token, '/workflows'), api<Execution[]>(token, '/executions'),
+        const [m, catalog, w, e, detail] = await Promise.all([
+          api<Machine[]>(token, '/machines'), api<Engine[]>(token, '/engines'), api<Workflow[]>(token, '/workflows'), api<Execution[]>(token, '/executions'),
           executionID ? api<Execution>(token, '/executions/' + executionID) : undefined,
         ]);
         if (disposed) return;
-        setMachines(m); setWorkflows(w); setExecutions(e); setExecution(detail);
+        setMachines(m); setEngines(catalog); setWorkflows(w); setExecutions(e); setExecution(detail);
       } catch (error) {
         if (!disposed) setNotice((error as Error).message);
       } finally {
@@ -114,7 +116,7 @@ export default function Console() {
 
   function logOut() {
     sessionStorage.removeItem('agentrib.operator');
-    setToken(''); setEnrollment(''); setDraft(undefined); setMachines([]); setWorkflows([]); setExecutions([]);
+    setToken(''); setEnrollment(''); setDraft(undefined); setMachines([]); setEngines([]); setWorkflows([]); setExecutions([]);
     setMachine(''); setProject(''); setBrief(''); setBaseCommit(''); setExecutionID(''); setExecution(undefined); selectRun('');
   }
 
@@ -138,11 +140,18 @@ export default function Console() {
 
   const selectedMachine = machines.find(item => item.id === machine);
   const saved = workflows.find(item => item.id === draft?.id && item.version === draft?.version);
+  const savedEngine = engines.find(engine => engine.id === (saved?.engine || 'godot'));
+  const engineChanged = saved && (saved.engine || 'godot') !== (draft?.engine || 'godot');
+  const matchingProjects = selectedMachine?.projects.filter(id => (selectedMachine.project_engines?.[id] || 'godot') === savedEngine?.id) || [];
+  const availableForRun = !engineChanged && savedEngine?.implemented && matchingProjects.includes(project) &&
+    (!saved?.steps.some(step => step.executor === 'engine' || step.executor === savedEngine.id) || selectedMachine?.executors.includes(savedEngine.id));
+  const engineName = (id = 'godot') => engines.find(engine => engine.id === id)?.name || id;
+  const executionEngine = engineName(execution?.workflow?.engine);
   const completed = new Set(execution?.approved || []);
   for (const current of execution?.runs || []) if (current.status === 'succeeded' && current.step_id) completed.add(current.step_id);
 
   return <>
-    <header><div className="frame header"><a className="brand" href="/">Agent<span>rib</span></a><span>Godot 制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
+    <header><div className="frame header"><a className="brand" href="/">Agent<span>rib</span></a><span>游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
     <main className="frame">
       {notice && <p className="notice" role="status">{notice}</p>}
       {!token ? <section className="panel login">
@@ -152,7 +161,7 @@ export default function Console() {
         <h1>制作工作台</h1>
         <section className="panel">
           <h2>执行机器</h2>
-          <div className="machines">{machines.length ? machines.map(item => <article key={item.id}><div className="line"><strong>{item.name}</strong><span className="state">{Date.now() - new Date(item.seen).getTime() < 45000 ? '在线' : '离线'}</span></div><p>{item.executors.map(key => executors[key] || key).join(' · ') || '等待 Runner 报告'}</p><p>{item.projects.join(' · ')}</p></article>) : <p>还没有登记 Runner。</p>}</div>
+          <div className="machines">{machines.length ? machines.map(item => <article key={item.id}><div className="line"><strong>{item.name}</strong><span className="state">{Date.now() - new Date(item.seen).getTime() < 45000 ? '在线' : '离线'}</span></div><p>{item.executors.map(key => executors[key] || engineName(key)).join(' · ') || '等待 Runner 报告'}</p><p>{item.projects.map(id => id + ' · ' + engineName(item.project_engines?.[id])).join(' / ')}</p></article>) : <p>还没有登记 Runner。</p>}</div>
           <form className="inline-form" onSubmit={event => { event.preventDefault(); void action(async () => {
             const result = await api<{ token: string }>(token, '/machines', { name: machineName });
             setEnrollment(result.token); setMachineName('');
@@ -164,15 +173,21 @@ export default function Console() {
           <div className="line"><h2>工作流编辑</h2><button disabled={busy} onClick={() => void action(async () => {
             const original = await api<Workflow>(token, '/workflows/template');
             setDraft({ ...original, id: original.id + '-' + newID().slice(0, 6) });
-          })}>从 Godot 模板创建</button></div>
+          })}>从游戏模板创建</button></div>
           <label>已保存的工作流<select value={saved?.id || ''} onChange={event => setDraft(workflows.find(item => item.id === event.target.value))}><option value="">选择工作流</option>{workflows.map(item => <option key={item.id} value={item.id}>{item.name} · v{item.version}</option>)}</select></label>
           {draft && <>
-            <label>工作流名称<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+            <div className="fields"><label>工作流名称<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+              <label>游戏引擎<select value={draft.engine || 'godot'} onChange={event => {
+                const previous = draft.engine || 'godot';
+                setDraft({ ...draft, engine: event.target.value, steps: draft.steps.map(step => step.executor === previous ? { ...step, executor: 'engine' } : step) });
+                setProject('');
+              }}>{engines.map(engine => <option key={engine.id} value={engine.id}>{engine.name}{engine.implemented ? '' : ' · 计划接入'}</option>)}</select></label></div>
+            {engines.some(engine => engine.id === draft.engine && !engine.implemented) && <p>该引擎可保存到工作流，接入 Runner 适配器后可运行。</p>}
             <div className="step-list">{draft.steps.map((step, index) => <fieldset key={index}>
               <legend>{step.id || '新步骤'}</legend>
-              <div className="fields"><label>标识<input value={step.id} onChange={event => updateStep(index, { id: event.target.value })} /></label><label>名称<input value={step.name} onChange={event => updateStep(index, { name: event.target.value })} /></label><label>角色<input value={step.role} onChange={event => updateStep(index, { role: event.target.value })} /></label><label>执行方式<select value={step.executor} onChange={event => updateStep(index, { executor: event.target.value, read_only: false })}>{Object.entries(executors).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label></div>
+              <div className="fields"><label>标识<input value={step.id} onChange={event => updateStep(index, { id: event.target.value })} /></label><label>名称<input value={step.name} onChange={event => updateStep(index, { name: event.target.value })} /></label><label>角色<input value={step.role} onChange={event => updateStep(index, { role: event.target.value })} /></label><label>执行方式<select value={step.executor} onChange={event => updateStep(index, { executor: event.target.value, read_only: false })}>{Object.entries(executors).map(([key, name]) => <option key={key} value={key}>{name}</option>)}{!executors[step.executor] && <option value={step.executor}>{engineName(step.executor)}</option>}</select></label></div>
               <div className="fields"><label>前置步骤（逗号分隔）<input value={(step.depends_on || []).join(',')} onChange={event => updateStep(index, { depends_on: event.target.value.split(',') })} /></label><label>提交来源<select value={step.base_from || ''} onChange={event => updateStep(index, { base_from: event.target.value })}><option value="">项目起始提交</option>{(step.depends_on || []).map((id, i) => id.trim() && <option key={i} value={id.trim()}>{id.trim()}</option>)}</select></label></div>
-              {step.executor !== 'approval' && step.executor !== 'godot' && <label>任务说明<textarea value={step.prompt || ''} onChange={event => updateStep(index, { prompt: event.target.value })} /></label>}
+              {(step.executor === 'minimax-code' || step.executor === 'codex' || step.executor === 'qoder-cn') && <label>任务说明<textarea value={step.prompt || ''} onChange={event => updateStep(index, { prompt: event.target.value })} /></label>}
               {(step.executor === 'codex' || step.executor === 'qoder-cn') && <label className="check"><input type="checkbox" checked={step.read_only || false} onChange={event => updateStep(index, { read_only: event.target.checked })} />只读验收</label>}
               <button className="text-button" disabled={draft.steps.length === 1} onClick={() => setDraft({ ...draft, steps: draft.steps.filter((_, i) => i !== index) })}>移除步骤</button>
             </fieldset>)}</div>
@@ -189,10 +204,12 @@ export default function Console() {
             const result = await api<Execution>(token, '/executions', { id: newID(), workflow_id: saved.id, version: saved.version, machine_id: machine, project, brief, commit: baseCommit.trim() });
             setExecution(undefined); setExecutionID(result.id); selectRun('');
           }); }}>
-            <p>{saved.name} · v{saved.version}</p>
-            <div className="fields"><label>执行机器<select value={machine} onChange={event => { setMachine(event.target.value); setProject(''); }} required><option value="">选择机器</option>{machines.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>项目<select value={project} onChange={event => setProject(event.target.value)} required><option value="">选择本机项目</option>{selectedMachine?.projects.map(id => <option key={id}>{id}</option>)}</select></label><label>起始提交（选填）<input value={baseCommit} onChange={event => setBaseCommit(event.target.value)} placeholder="默认为本机 HEAD" /></label></div>
+            <p>{saved.name} · v{saved.version} · {savedEngine?.name}</p>
+            {engineChanged && <p>保存引擎变更后可启动工作流。</p>}
+            {savedEngine && !savedEngine.implemented && <p>{savedEngine.name} 适配器计划接入，当前可编辑和保存此流程。</p>}
+            <div className="fields"><label>执行机器<select value={machine} onChange={event => { setMachine(event.target.value); setProject(''); }} required><option value="">选择机器</option>{machines.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>项目<select value={project} onChange={event => setProject(event.target.value)} required><option value="">选择匹配引擎的项目</option>{matchingProjects.map(id => <option key={id}>{id}</option>)}</select></label><label>起始提交（选填）<input value={baseCommit} onChange={event => setBaseCommit(event.target.value)} placeholder="默认为本机 HEAD" /></label></div>
             <label>游戏简报<textarea rows={4} value={brief} onChange={event => setBrief(event.target.value)} required /></label>
-            <button className="primary" disabled={busy}>启动工作流</button>
+            <button className="primary" disabled={busy || !availableForRun}>启动工作流</button>
           </form> : <p>先选择已保存的工作流。</p>}
         </section>
 
@@ -203,7 +220,7 @@ export default function Console() {
             const current = execution.runs?.find(item => item.step_id === step.id);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
-            return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {executors[step.executor] || step.executor} · {label[status] || status}</p></div><div className="actions">
+            return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executors[step.executor] || engineName(step.executor)} · {label[status] || status}</p></div><div className="actions">
               {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
             </div></li>;

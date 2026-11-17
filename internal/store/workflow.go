@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/PhongFeng/Agentrib/internal/protocol"
@@ -18,6 +19,10 @@ import (
 var workflowSchema string
 
 const executionColumns = "id, workflow_id,version,machine_id,project,brief,commit_sha,status,created"
+const workflowColumns = "id,version,name,steps,engine"
+
+var ErrEngineUnavailable = errors.New("Selected game engine has no available adapter on this Runner")
+var ErrProjectEngine = errors.New("Selected project does not match the workflow engine")
 
 type queryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -41,7 +46,8 @@ func (s *Store) SaveWorkflow(ctx context.Context, workflow protocol.Workflow) (p
 		return workflow, ErrConflict
 	}
 	workflow.Version = version + 1
-	if _, err := tx.Exec(ctx, `INSERT INTO workflows VALUES ($1,$2,$3,$4)`, workflow.ID, workflow.Version, workflow.Name, workflow.Steps); err != nil {
+	workflow.Engine = protocol.EngineID(workflow.Engine)
+	if _, err := tx.Exec(ctx, `INSERT INTO workflows (`+workflowColumns+`) VALUES ($1,$2,$3,$4,$5)`, workflow.ID, workflow.Version, workflow.Name, workflow.Steps, workflow.Engine); err != nil {
 		return workflow, err
 	}
 	return workflow, tx.Commit(ctx)
@@ -50,7 +56,7 @@ func (s *Store) SaveWorkflow(ctx context.Context, workflow protocol.Workflow) (p
 func scanWorkflow(row pgx.Row) (protocol.Workflow, error) {
 	var workflow protocol.Workflow
 	var steps []byte
-	err := row.Scan(&workflow.ID, &workflow.Version, &workflow.Name, &steps)
+	err := row.Scan(&workflow.ID, &workflow.Version, &workflow.Name, &steps, &workflow.Engine)
 	if err == nil {
 		err = json.Unmarshal(steps, &workflow.Steps)
 	}
@@ -58,7 +64,7 @@ func scanWorkflow(row pgx.Row) (protocol.Workflow, error) {
 }
 
 func (s *Store) Workflows(ctx context.Context) ([]protocol.Workflow, error) {
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (id) id,version,name,steps FROM workflows ORDER BY id,version DESC LIMIT 100`)
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (id) `+workflowColumns+` FROM workflows ORDER BY id,version DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +87,26 @@ func scanExecution(row pgx.Row) (protocol.Execution, error) {
 }
 
 func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInput) (protocol.Execution, error) {
+	workflow, err := scanWorkflow(s.db.QueryRow(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE id=$1 AND version=$2`, input.WorkflowID, input.Version))
+	if err != nil {
+		return protocol.Execution{}, err
+	}
+	engine, known := protocol.FindEngine(workflow.Engine)
+	if !known || !engine.Implemented {
+		return protocol.Execution{}, ErrEngineUnavailable
+	}
+	machine, err := scanMachine(s.db.QueryRow(ctx, `SELECT `+machineColumns+` FROM machines WHERE id=$1`, input.MachineID))
+	if err != nil {
+		return protocol.Execution{}, err
+	}
+	if !slices.Contains(machine.Projects, input.Project) || protocol.EngineID(machine.ProjectEngines[input.Project]) != engine.ID {
+		return protocol.Execution{}, ErrProjectEngine
+	}
+	for _, step := range workflow.Steps {
+		if (step.Executor == "engine" || step.Executor == engine.ID) && !slices.Contains(machine.Executors, engine.ID) {
+			return protocol.Execution{}, ErrEngineUnavailable
+		}
+	}
 	row := s.db.QueryRow(ctx, `INSERT INTO executions (id, workflow_id,version,machine_id,project,brief,commit_sha)
 		VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET id=excluded.id
 		WHERE executions.workflow_id=excluded.workflow_id AND executions.version=excluded.version AND executions.machine_id=excluded.machine_id
@@ -120,7 +146,7 @@ func (s *Store) Execution(ctx context.Context, id string) (protocol.Execution, e
 
 func hydrate(ctx context.Context, db queryer, e protocol.Execution) (protocol.Execution, error) {
 	var err error
-	e.Workflow, err = scanWorkflow(db.QueryRow(ctx, `SELECT id,version,name,steps FROM workflows WHERE id=$1 AND version=$2`, e.WorkflowID, e.Version))
+	e.Workflow, err = scanWorkflow(db.QueryRow(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE id=$1 AND version=$2`, e.WorkflowID, e.Version))
 	if err != nil {
 		return e, err
 	}
@@ -282,7 +308,11 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 			continue
 		}
 		spec := protocol.Spec{MachineID: e.MachineID, Project: e.Project, Executor: step.Executor,
-			Title: step.Name, ReadOnly: step.ReadOnly, Prompt: "Role: " + step.Role + "\n" + step.Prompt + "\n\nGame brief:\n" + e.Brief, Commit: e.Commit}
+			Engine: e.Workflow.Engine, Title: step.Name, ReadOnly: step.ReadOnly,
+			Prompt: "Role: " + step.Role + "\n" + step.Prompt + "\n\nGame brief:\n" + e.Brief, Commit: e.Commit}
+		if spec.Executor == "engine" {
+			spec.Executor = spec.Engine
+		}
 		if step.BaseFrom != "" {
 			predecessor := runs[step.BaseFrom].Result
 			if predecessor == nil || predecessor.Commit == "" {
@@ -296,7 +326,8 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		if step.ReadOnly {
 			for _, dependency := range step.DependsOn {
 				prior := runs[dependency]
-				if prior.Spec.Executor != "godot" {
+				engine, ok := protocol.FindEngine(prior.Spec.Executor)
+				if !ok {
 					continue
 				}
 				var evidence string
@@ -308,11 +339,12 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 				)
 				SELECT coalesce(string_agg(body,chr(10) ORDER BY seq),'') FROM (
 					SELECT e.seq,left(e.body,240) AS body FROM run_events e,test_start s,test_end f
-					WHERE e.run_id=$1 AND e.kind='godot' AND e.seq>s.seq AND e.seq<f.seq ORDER BY e.seq DESC LIMIT 16
-				) AS lines`, prior.ID).Scan(&evidence); err != nil {
+					WHERE e.run_id=$1 AND (e.kind='test' OR ($2='godot' AND e.kind='godot' AND e.seq>s.seq AND e.seq<f.seq))
+					ORDER BY e.seq DESC LIMIT 16
+				) AS lines`, prior.ID, engine.ID).Scan(&evidence); err != nil {
 					return err
 				}
-				spec.Prompt += "\n\nGodot test evidence (test script output):\n" + strings.TrimSpace(evidence)
+				spec.Prompt += "\n\n" + engine.Name + " test evidence (test script output):\n" + strings.TrimSpace(evidence)
 			}
 		}
 		digest := sha256.Sum256([]byte(e.ID + "/" + step.ID))

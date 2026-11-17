@@ -20,6 +20,7 @@ var schema string
 
 const leaseInterval = "interval '45 seconds'"
 const runColumns = "id, spec, status, lease, created, updated, result, execution_id, step_id"
+const machineColumns = "id,name,executors,projects,seen,project_engines"
 
 var ErrConflict = errors.New("run state or lease changed")
 
@@ -82,7 +83,7 @@ func (s *Store) Enroll(ctx context.Context, name string) (protocol.Enrollment, e
 	enrollment.Token = hex.EncodeToString(key[:])
 	digest := sha256.Sum256([]byte(enrollment.Token))
 	row := s.db.QueryRow(ctx, `INSERT INTO machines (id, name, credential_hash) VALUES ($1,$2,$3)
-		RETURNING id,name,executors,projects,seen`, id, name, digest[:])
+		RETURNING `+machineColumns, id, name, digest[:])
 	enrollment.Machine, err = scanMachine(row)
 	return enrollment, err
 }
@@ -96,12 +97,12 @@ func (s *Store) AuthRunner(ctx context.Context, token string) (string, error) {
 
 func scanMachine(row pgx.Row) (protocol.Machine, error) {
 	var m protocol.Machine
-	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen)
+	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines)
 	return m, err
 }
 
 func (s *Store) Machines(ctx context.Context) ([]protocol.Machine, error) {
-	rows, err := s.db.Query(ctx, `SELECT id,name,executors,projects,seen FROM machines ORDER BY name,id LIMIT 200`)
+	rows, err := s.db.Query(ctx, `SELECT `+machineColumns+` FROM machines ORDER BY name,id LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,10 @@ func (s *Store) Machines(ctx context.Context) ([]protocol.Machine, error) {
 }
 
 func (s *Store) Heartbeat(ctx context.Context, id string, h protocol.Heartbeat) error {
-	_, err := s.db.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,seen=now() WHERE id=$1`, id, h.Executors, h.Projects)
+	if h.ProjectEngines == nil {
+		h.ProjectEngines = map[string]string{}
+	}
+	_, err := s.db.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,seen=now() WHERE id=$1`, id, h.Executors, h.Projects, h.ProjectEngines)
 	return err
 }
 
@@ -220,6 +224,7 @@ func (s *Store) Claim(ctx context.Context, machine string) (*protocol.Run, error
 		WHERE id=(SELECT r.id FROM runs r JOIN machines m ON m.id=r.machine_id
 		WHERE r.machine_id=$1 AND r.status='queued' AND m.seen > now()-`+leaseInterval+`
 		AND r.spec->>'executor'=ANY(m.executors) AND r.spec->>'project'=ANY(m.projects)
+		AND coalesce(r.spec->>'engine','godot')=coalesce(m.project_engines->>(r.spec->>'project'),'godot')
 		ORDER BY r.created,r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED) RETURNING `+runColumns, machine, lease)
 	run, err := scanRun(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {

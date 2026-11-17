@@ -17,6 +17,7 @@ type Workflow struct {
 	ID      string `json:"id"`
 	Version int    `json:"version"`
 	Name    string `json:"name"`
+	Engine  string `json:"engine,omitempty"`
 	Steps   []Step `json:"steps"`
 }
 

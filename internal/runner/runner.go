@@ -29,10 +29,10 @@ const (
 )
 
 type Runner struct {
-	cfg          Config
-	client       *http.Client
-	backends     map[string]Backend
-	godotCommand string
+	cfg      Config
+	client   *http.Client
+	backends map[string]Backend
+	engines  map[string]engineAdapter
 }
 
 var errLease = errors.New("run lease no longer active")
@@ -42,19 +42,20 @@ var runID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 func New(cfg Config) *Runner {
 	return &Runner{cfg: cfg, client: &http.Client{Timeout: 8 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return errors.New("runner API redirect refused") }},
-		backends: make(map[string]Backend)}
+		backends: make(map[string]Backend), engines: make(map[string]engineAdapter)}
 }
 
 func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
-	h := protocol.Heartbeat{Executors: []string{}, Projects: []string{}}
-	for key := range r.cfg.Projects {
+	h := protocol.Heartbeat{Executors: []string{}, Projects: []string{}, ProjectEngines: make(map[string]string)}
+	for key, project := range r.cfg.Projects {
 		h.Projects = append(h.Projects, key)
+		h.ProjectEngines[key] = project.Engine
 	}
 	names := map[string][]string{
 		"codex": {"codex"}, "qoder-cn": {"qodercn", "qoderclicn"},
-		"minimax-code": {"mcode"}, "godot": {"godot", "godot4"},
+		"minimax-code": {"mcode"},
 	}
-	for _, key := range []string{"codex", "qoder-cn", "minimax-code", "godot"} {
+	for _, key := range []string{"codex", "qoder-cn", "minimax-code"} {
 		path, err := findCommand(r.cfg.Commands[key], names[key]...)
 		if err != nil {
 			slog.Info("executor unavailable", "executor", key)
@@ -69,23 +70,30 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 			backend = QoderCN{path}
 		case "minimax-code":
 			backend = MiniMaxCode{path}
-		case "godot":
-			err = command(check, "", path, "--version").Run()
 		}
-		if backend != nil {
-			err = backend.Probe(check)
-		}
+		err = backend.Probe(check)
 		cancel()
 		if err != nil {
 			slog.Info("executor probe failed", "executor", key, "error", err)
 			continue
 		}
-		if backend == nil {
-			r.godotCommand = path
-		} else {
-			r.backends[key] = backend
-		}
+		r.backends[key] = backend
 		h.Executors = append(h.Executors, key)
+	}
+	for key, adapter := range engineAdapters {
+		path, err := findCommand(r.cfg.Commands[key], adapter.commands...)
+		if err == nil {
+			check, cancel := context.WithTimeout(ctx, 8*time.Second)
+			err = adapter.create(path).Probe(check)
+			cancel()
+		}
+		if err != nil {
+			slog.Info("engine command unavailable", "engine", key, "error", err)
+			path = ""
+		} else {
+			h.Executors = append(h.Executors, key)
+		}
+		r.engines[key] = adapter.create(path)
 	}
 	return h
 }
@@ -166,7 +174,7 @@ func (r *Runner) uploadArtifact(ctx context.Context, job protocol.Run, artifact 
 func (r *Runner) Run(ctx context.Context) error {
 	h := r.Detect(ctx)
 	if len(h.Executors) == 0 {
-		return errors.New("no usable Codex, Qoder CN, or Godot command found")
+		return errors.New("no usable Agent or game engine command found")
 	}
 	slog.Info("starting runner", "executors", h.Executors, "projects", h.Projects)
 	loop, stop := context.WithCancelCause(ctx)

@@ -1,17 +1,17 @@
 # Agentrib
 
-Agentrib 是一个面向 **Godot 游戏开发**的 Agent 协作工具。默认工作流由 MiniMax Code 生成游戏界面，Codex 接过界面提交实现玩法，Godot 运行测试并导出，Qoder CN 对交付版本做只读 QA。
+Agentrib 是一个面向**游戏开发**的 Agent 协作工具。在浏览器里为工作流选择游戏引擎。MiniMax Code 生成界面，Codex 接过界面提交实现玩法，Runner 调用所选引擎测试和构建，Qoder CN 对交付版本做只读 QA。
 
 [项目官网](https://www.agentrib.com/) · [浏览器控制台](https://www.agentrib.com/console/)
 
 [部署与验收说明](docs/deployment.md)
 
-首版已在服务器与 Mac mini 上用独立 Godot 测试工程完成真机验收。《月面送电》是下一阶段的游戏选题。
+Godot 已在 Mac mini 上通过真机验收。Unreal Engine、Unity 和 Cocos 已列入引擎选择，可保存工作流版本，接入各自的 Runner 适配器后即可运行。
 
 ## 首版范围
 
 - **入口**　浏览器控制台，可编辑工作流、绑定 Agent、派单、查看日志和确认交付。
-- **执行**　Go Runner 主动通过 HTTPS 连接 Go 控制面，使用本机 Git 工作区和 Godot 命令行。控制面用 PostgreSQL 持久化任务、运行记录和产物。
+- **执行**　Go Runner 通过 HTTPS 向 Go 控制面上报本机项目和引擎能力。控制面将引擎选择随工作流版本保存在 PostgreSQL，Runner 在独立 Git 工作区调用对应适配器。
 - **验收项目**　《月面送电》，一款 10 关的 2D 休闲推箱解谜游戏。10 关的解法须在 Godot 中逐关重放，试玩包与验收记录须对应同一个 Git 提交。
 
 ```mermaid
@@ -20,9 +20,11 @@ flowchart LR
     Server --> Database[(PostgreSQL)]
     Runner[Go Runner] -->|HTTPS 心跳、领单、回传| Server
     Runner --> Agents[MiniMax Code 界面、Codex 开发、Qoder CN 验收]
-    Runner --> Godot[Godot 回放测试与 Web 导出]
+    Runner --> Engine[引擎适配器]
+    Engine --> Godot[Godot 测试与 Web 导出]
+    Engine -. 计划接入 .-> Future[Unreal Engine / Unity / Cocos]
     Agents --> Git[项目 Git 工作区]
-    Godot --> Git
+    Engine --> Git
 ```
 
 ## 实现步骤

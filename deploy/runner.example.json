@@ -11,6 +11,7 @@
   "projects": {
     "moon-power": {
       "repository": "/Users/runner/projects/moon-power",
+      "engine": "godot",
       "test_script": "tests/run.gd",
       "web_preset": "Web"
     }

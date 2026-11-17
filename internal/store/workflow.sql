@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS workflows (
     PRIMARY KEY (id,version)
 );
 
+ALTER TABLE workflows ADD COLUMN IF NOT EXISTS engine text NOT NULL DEFAULT 'godot';
+
 CREATE TABLE IF NOT EXISTS executions (
     id text PRIMARY KEY,
     workflow_id text NOT NULL,
