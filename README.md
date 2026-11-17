@@ -6,7 +6,18 @@ Agentrib 是一个面向**游戏开发**的 Agent 协作工具。为工作流选
 
 [部署与验收说明](docs/deployment.md)
 
-Godot 已在 Mac mini 上通过真机验收。Unreal Engine、Unity 和 Cocos 已列入引擎选择，可保存工作流版本，接入各自的 Runner 适配器后即可运行。
+## 游戏引擎支持
+
+在「工作流编辑 → 游戏引擎」中选择引擎并保存版本。计划接入的引擎可以先配置工作流，适配器上线后即可派单。
+
+| 引擎 | 接入状态 | 项目结构与开发流程 |
+| --- | --- | --- |
+| <img src="site/engines/godot.svg" alt="" width="32"> **Godot 4** | **已接入** | `project.godot`。Mac mini 已验证无界面测试和 Web 试玩包导出。 |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unreal-white.png"><img src="site/engines/unreal.png" alt="" width="32"></picture> **Unreal Engine** | 计划接入 | `.uproject` 与 `Source/`。面向 C++ 与蓝图工作流。 |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unity-white.svg"><img src="site/engines/unity.svg" alt="" width="32"></picture> **Unity** | 计划接入 | `Assets/` 与 `Packages/`。面向 C# 工作流。 |
+| <img src="site/engines/cocos-creator.png" alt="" width="32"> **Cocos Creator** | 计划接入 | `assets/` 与 `package.json`。面向 TypeScript 工作流。 |
+
+图标来源见 [Godot Press Kit](https://godotengine.org/press/)（CC BY 4.0）、[Epic Games 品牌资源](https://www.unrealengine.com/en-US/branding)、[Unity 品牌指南](https://unity.com/legal/branding-trademarks)和 [Cocos Creator 文档](https://docs.cocos.com/creator/3.8/manual/en/)。
 
 ## Agent CLI
 

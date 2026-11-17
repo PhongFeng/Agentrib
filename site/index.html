@@ -14,6 +14,27 @@
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <style>
     .agent-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:0 24px;list-style:none;padding:0;margin:24px 0 0}.agent-list li{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:10px 0}.agent-list code{color:var(--muted);font-size:13px;white-space:nowrap}
+    .engine-list {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      list-style: none;
+      padding: 0;
+      margin: 24px 0 0;
+    }
+    .engine-list li {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .engine-icon { width: 48px; height: 48px; object-fit: contain; }
+    .engine-list h3 { margin-top: 12px; font-size: 17px; }
+    .engine-status { color: var(--muted); font-size: 13px; }
+    .engine-status.ready { color: var(--mint); }
+    .engine-description { margin-top: 8px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+    @media (max-width: 890px) { .engine-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 470px) { .engine-list { grid-template-columns: 1fr; } }
     :root{color-scheme:dark;--bg:#080d17;--panel:#111a2a;--line:#26344b;--ink:#f0f5fd;--muted:#a2aec3;--mint:#65e1c7;--blue:#90b5ff;--max:1140px;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.65}a{color:inherit;text-decoration:none}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}img{display:block}h1,h2,h3,p{margin:0}::selection{background:#65e1c7;color:#080d17}
     .wrap{width:min(var(--max),calc(100% - 80px));margin-inline:auto}.header{border-bottom:1px solid #1b283b}.nav{min-height:68px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:inline-flex;align-items:center;gap:10px;font-size:22px;font-weight:750;letter-spacing:-.045em}.brand img{width:36px;height:24px}.brand strong{color:var(--mint);font-weight:inherit}.nav-links{display:flex;align-items:center;gap:27px;font-size:14px;color:var(--muted)}.nav-links a:hover,.foot a:hover{color:var(--mint)}.nav-links .repo{color:var(--ink)}
@@ -29,7 +50,8 @@
       <a class="brand" href="#top" aria-label="Agentrib 首页"><img src="./favicon.svg" width="36" height="24" alt=""><span>Agent<strong>rib</strong></span></a>
       <nav class="nav-links" aria-label="主导航">
         <a href="#workflow">制作流程</a>
-        <a href="#agents">支持的 Agent</a>
+        <a href="#engines">引擎支持</a>
+        <a href="#agents">Agent CLI</a>
         <a class="repo" href="https://github.com/PhongFeng/Agentrib">GitHub ↗</a>
       </nav>
     </div>
@@ -68,13 +90,46 @@
     <section class="section" id="workflow" aria-labelledby="workflow-title">
       <div class="wrap">
         <h2 id="workflow-title">在浏览器组织制作流程</h2>
-        <p class="lead">为每个步骤选择 Agent、填写任务说明并设置前置依赖。Godot 已接入，Unreal Engine、Unity 和 Cocos 计划接入。</p>
+        <p class="lead">为每个步骤选择 Agent、填写任务说明并设置前置依赖。</p>
         <ol class="steps">
           <li><h3>定需求</h3><p>把产品文档交给选定的 Agent，将文档提交传给后续步骤。</p></li>
           <li><h3>制作界面与玩法</h3><p>分别指派设计和开发 Agent，让后续步骤从前置提交继续。</p></li>
           <li><h3>跑测试</h3><p>Runner 检出指定提交，由所选引擎的适配器运行测试和构建。</p></li>
           <li><h3>确认交付</h3><p>选定的 QA Agent 审查测试过的版本，由你试玩并确认发布。</p></li>
         </ol>
+      </div>
+    </section>
+
+    <section class="section" id="engines" aria-labelledby="engines-title">
+      <div class="wrap">
+        <h2 id="engines-title">游戏引擎支持</h2>
+        <p class="lead">在工作流编辑器中选择引擎。计划接入的引擎可以先保存到工作流，适配器上线后即可派单。</p>
+        <ul class="engine-list">
+          <li>
+            <img class="engine-icon" src="./engines/godot.svg" alt="" width="48" height="48">
+            <h3>Godot 4</h3>
+            <p class="engine-status ready">已接入</p>
+            <p class="engine-description"><code>project.godot</code> 项目可执行无界面测试，并使用 Web 预设导出试玩包。</p>
+          </li>
+          <li>
+            <img class="engine-icon" src="./engines/unreal-white.png" alt="" width="48" height="48">
+            <h3>Unreal Engine</h3>
+            <p class="engine-status">计划接入</p>
+            <p class="engine-description"><code>.uproject</code> 项目，面向 C++ 与蓝图开发流程。</p>
+          </li>
+          <li>
+            <img class="engine-icon" src="./engines/unity-white.svg" alt="" width="48" height="48">
+            <h3>Unity</h3>
+            <p class="engine-status">计划接入</p>
+            <p class="engine-description"><code>Assets/</code> 与 <code>Packages/</code> 项目结构，面向 C# 开发流程。</p>
+          </li>
+          <li>
+            <img class="engine-icon" src="./engines/cocos-creator.png" alt="" width="48" height="48">
+            <h3>Cocos Creator</h3>
+            <p class="engine-status">计划接入</p>
+            <p class="engine-description"><code>assets/</code> 与 <code>package.json</code> 项目结构，面向 TypeScript 开发流程。</p>
+          </li>
+        </ul>
       </div>
     </section>
 
