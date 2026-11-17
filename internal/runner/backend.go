@@ -236,7 +236,7 @@ func parseQoder(line string, emit Emit) error {
 	if data.Type == "result" {
 		if data.IsError || strings.HasPrefix(data.Subtype, "error") {
 			emit("error", data.Result)
-			return errors.New("Qoder CN reported a failed result")
+			return errors.New("Agent reported a failed result")
 		}
 		emit("result", data.Result)
 	}

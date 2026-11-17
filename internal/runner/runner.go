@@ -51,26 +51,15 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 		h.Projects = append(h.Projects, key)
 		h.ProjectEngines[key] = project.Engine
 	}
-	names := map[string][]string{
-		"codex": {"codex"}, "qoder-cn": {"qodercn", "qoderclicn"},
-		"minimax-code": {"mcode"},
-	}
-	for _, key := range []string{"codex", "qoder-cn", "minimax-code"} {
-		path, err := findCommand(r.cfg.Commands[key], names[key]...)
+	for _, agent := range protocol.Agents {
+		key := agent.ID
+		path, err := findCommand(r.cfg.Commands[key], agent.Commands...)
 		if err != nil {
 			slog.Info("executor unavailable", "executor", key)
 			continue
 		}
 		check, cancel := context.WithTimeout(ctx, 8*time.Second)
-		var backend Backend
-		switch key {
-		case "codex":
-			backend = Codex{path}
-		case "qoder-cn":
-			backend = QoderCN{path}
-		case "minimax-code":
-			backend = MiniMaxCode{path}
-		}
+		backend := backendFor(agent, path)
 		err = backend.Probe(check)
 		cancel()
 		if err != nil {

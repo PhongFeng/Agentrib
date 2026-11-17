@@ -23,6 +23,7 @@ const workflowColumns = "id,version,name,steps,engine"
 
 var ErrEngineUnavailable = errors.New("Selected game engine has no available adapter on this Runner")
 var ErrProjectEngine = errors.New("Selected project does not match the workflow engine")
+var ErrAgentUnavailable = errors.New("Selected Agent is unavailable on this Runner")
 
 type queryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -103,6 +104,9 @@ func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInpu
 		return protocol.Execution{}, ErrProjectEngine
 	}
 	for _, step := range workflow.Steps {
+		if agent, ok := protocol.FindAgent(step.Executor); ok && !slices.Contains(machine.Executors, agent.ID) {
+			return protocol.Execution{}, fmt.Errorf("%w: %s", ErrAgentUnavailable, agent.Name)
+		}
 		if (step.Executor == "engine" || step.Executor == engine.ID) && !slices.Contains(machine.Executors, engine.ID) {
 			return protocol.Execution{}, ErrEngineUnavailable
 		}
