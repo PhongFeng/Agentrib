@@ -4,7 +4,8 @@
   "token_file": "/Users/runner/.agentrib/runner.token",
   "commands": {
     "codex": "/Users/runner/.local/bin/codex",
-    "qoder-cn": "/Users/runner/.local/bin/qodercn",
+    "qoder-cn": "/Users/runner/.local/bin/qoderclicn",
+    "minimax-code": "/Users/runner/.minimax-code/bin/mcode",
     "godot": "/Applications/Godot.app/Contents/MacOS/Godot"
   },
   "projects": {

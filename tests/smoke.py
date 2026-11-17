@@ -61,17 +61,24 @@ def wait_for(check, detail, seconds=300):
 def smoke(api, machine, project):
     def online():
         return next((m for m in api("/machines") if m["id"] == machine and project in m["projects"]
-                     and {"codex", "godot"} <= set(m["executors"])), None)
+                     and {"minimax-code", "codex", "godot", "qoder-cn"} <= set(m["executors"])), None)
 
-    wait_for(online, "Codex and Godot on the machine", 60)
+    wait_for(online, "MiniMax Code, Codex, Godot and Qoder CN on the machine", 60)
     workflow = api("/workflows/template")
     workflow.update(id="acceptance-" + uuid4().hex[:8], name="Mac deployment acceptance")
     for step in workflow["steps"]:
+        if step["id"] == "ui":
+            step["prompt"] = ("This is a disposable fixture. Create only ui_handoff.tscn with a valid Godot 4 Label root "
+                              "and the exact label text AGENTRIB_UI_HANDOFF. Use a file-writing tool. Keep main.tscn unchanged.")
         if step["id"] == "build":
-            step["prompt"] = "This is a disposable acceptance fixture. Create only qa_marker.txt at the project root with the exact content AGENTRIB_ACCEPTANCE followed by a newline. Use a file-edit tool; the Runner records the commit."
+            step["prompt"] = ("Read ui_handoff.tscn from the prior step and verify it is a Godot Label with text AGENTRIB_UI_HANDOFF. "
+                              "Instance that scene in the existing main.tscn. Create qa_marker.txt with the exact content "
+                              "AGENTRIB_ACCEPTANCE followed by a newline. Edit only main.tscn and qa_marker.txt.")
         if step["id"] == "qa":
-            step["executor"] = "codex"
-            step["prompt"] = "Read qa_marker.txt in the checked-out fixture and the Godot evidence in this task. Confirm whether it contains AGENTRIB_ACCEPTANCE and the evidence contains the headless PASS result. In the final answer include exactly ACCEPTANCE_QA_PASS when both pass."
+            step["prompt"] = ("Read main.tscn, ui_handoff.tscn and qa_marker.txt in the checkout. Verify the UI scene is instanced, "
+                              "its label says AGENTRIB_UI_HANDOFF, the marker says AGENTRIB_ACCEPTANCE, and the provided Godot "
+                              "evidence contains the headless PASS result. Return exactly ACCEPTANCE_QA_PASS if all pass, "
+                              "otherwise say what failed. Use read-only tools.")
     workflow = api("/workflows", workflow)
     execution_id = uuid4().hex
     path = "/executions/" + execution_id
@@ -80,6 +87,11 @@ def smoke(api, machine, project):
                         "brief": "Validate the Agentrib deployment with a disposable Godot smoke project."})
     api(path + "/approve/brief", {})
     print(f"Workflow execution {execution_id}", flush=True)
+    verify_delivery(api, execution_id)
+
+
+def verify_delivery(api, execution_id):
+    path = "/executions/" + execution_id
 
     def finished(step):
         e = api(path)
@@ -94,14 +106,18 @@ def smoke(api, machine, project):
                 return run
         return None
 
+    ui = wait_for(lambda: finished("ui"), "MiniMax Code UI scene")
     build = wait_for(lambda: finished("build"), "Codex development")
     verify = wait_for(lambda: finished("tests"), "Godot test and web export")
-    review = wait_for(lambda: finished("qa"), "Codex read-only QA")
+    review = wait_for(lambda: finished("qa"), "Qoder CN read-only QA")
     commit = build["result"]["commit"]
+    if ui["result"]["commit"] != build["spec"]["commit"] or ui["result"]["commit"] == commit:
+        raise RuntimeError("Codex did not start from the MiniMax UI commit and create a new revision")
     if not all(run.get("result", {}).get("commit") == commit for run in (verify, review)):
         raise RuntimeError("Runs do not share the same Git commit")
-    if "ACCEPTANCE_QA_PASS" not in "\n".join(event["text"] for event in api.detail(review)["events"] if event["kind"] == "agent"):
-        raise RuntimeError("Codex did not return the expected QA verdict")
+    if not any(event["kind"] == "result" and "ACCEPTANCE_QA_PASS" in event["text"].strip().splitlines()
+               for event in api.detail(review)["events"]):
+        raise RuntimeError("Qoder CN did not return the expected QA verdict")
     artifacts = {}
     for artifact in verify["result"]["artifacts"]:
         data = api.raw(f"/runs/{verify['id']}/artifacts/{artifact['name']}")
@@ -116,7 +132,7 @@ def smoke(api, machine, project):
             raise RuntimeError("Godot Web export is incomplete")
     api(path + "/approve/release", {})
     wait_for(lambda: api(path)["status"] == "succeeded", "complete workflow", 20)
-    print(f"PASS: Git {commit}, three matching runs, Godot evidence and Web bundle verified", flush=True)
+    print(f"PASS: UI {ui['result']['commit']} -> Git {commit}; Godot evidence, Qoder CN review and Web bundle verified", flush=True)
 
 
 def cancel_smoke(api, machine, project, commit):

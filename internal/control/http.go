@@ -178,6 +178,7 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 
 func validSpec(spec protocol.Spec) bool {
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
+		(!spec.ReadOnly || spec.Executor != "minimax-code") &&
 		validText(spec.Title, 200) && len(spec.Prompt) <= 16000 && !strings.ContainsRune(spec.Prompt, 0) &&
 		(spec.Executor == "godot" || validText(spec.Prompt, 16000)) && (spec.Commit == "" || commitPattern.MatchString(spec.Commit))
 }
@@ -187,7 +188,11 @@ func validText(s string, max int) bool {
 }
 
 func validExecutor(key string) bool {
-	return key == "codex" || key == "qoder-cn" || key == "godot"
+	return agentExecutor(key) || key == "godot"
+}
+
+func agentExecutor(key string) bool {
+	return key == "codex" || key == "qoder-cn" || key == "minimax-code"
 }
 
 func (a *API) runs(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +230,7 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 	if !read(w, r, &h) {
 		return
 	}
-	if len(h.Executors) > 3 || len(h.Projects) > 64 {
+	if len(h.Executors) > 4 || len(h.Projects) > 64 {
 		problem(w, http.StatusBadRequest, "Heartbeat too large")
 		return
 	}

@@ -50,8 +50,11 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 	for key := range r.cfg.Projects {
 		h.Projects = append(h.Projects, key)
 	}
-	for _, key := range []string{"codex", "qoder-cn", "godot"} {
-		names := map[string][]string{"codex": {"codex"}, "qoder-cn": {"qodercn", "qoderclicn"}, "godot": {"godot", "godot4"}}
+	names := map[string][]string{
+		"codex": {"codex"}, "qoder-cn": {"qodercn", "qoderclicn"},
+		"minimax-code": {"mcode"}, "godot": {"godot", "godot4"},
+	}
+	for _, key := range []string{"codex", "qoder-cn", "minimax-code", "godot"} {
 		path, err := findCommand(r.cfg.Commands[key], names[key]...)
 		if err != nil {
 			slog.Info("executor unavailable", "executor", key)
@@ -64,6 +67,8 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 			backend = Codex{path}
 		case "qoder-cn":
 			backend = QoderCN{path}
+		case "minimax-code":
+			backend = MiniMaxCode{path}
 		case "godot":
 			err = command(check, "", path, "--version").Run()
 		}
