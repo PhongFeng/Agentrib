@@ -33,15 +33,12 @@ export default function Console() {
   const [token, setToken] = useState('');
   const [inputToken, setInputToken] = useState('');
   const [notice, setNotice] = useState('');
-  const [machines, setMachines] = useState<Machine[]>([]);
+  const [machines, setMachines] = useState<Machine[]>();
   const [engines, setEngines] = useState<Engine[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [executions, setExecutions] = useState<Execution[]>([]);
-  const [machine, setMachine] = useState('');
   const [project, setProject] = useState('');
-  const [machineName, setMachineName] = useState('');
-  const [enrollment, setEnrollment] = useState('');
   const [draft, setDraft] = useState<Workflow>();
   const [brief, setBrief] = useState('');
   const [baseCommit, setBaseCommit] = useState('');
@@ -118,8 +115,8 @@ export default function Console() {
 
   function logOut() {
     sessionStorage.removeItem('agentrib.operator');
-    setToken(''); setEnrollment(''); setDraft(undefined); setMachines([]); setEngines([]); setAgents([]); setWorkflows([]); setExecutions([]);
-    setMachine(''); setProject(''); setBrief(''); setBaseCommit(''); setExecutionID(''); setExecution(undefined); selectRun('');
+    setToken(''); setDraft(undefined); setMachines(undefined); setEngines([]); setAgents([]); setWorkflows([]); setExecutions([]);
+    setProject(''); setBrief(''); setBaseCommit(''); setExecutionID(''); setExecution(undefined); selectRun('');
   }
 
   function selectRun(id: string) { setRun(undefined); setEvents([]); setRunID(id); }
@@ -140,16 +137,16 @@ export default function Console() {
     setDraft(current => current && { ...current, steps: current.steps.map((step, i) => i === index ? { ...step, ...change } : step) });
   }
 
-  const selectedMachine = machines.find(item => item.id === machine);
+  const machine = machines?.length === 1 ? machines[0] : undefined;
   const saved = workflows.find(item => item.id === draft?.id && item.version === draft?.version);
   const savedEngine = engines.find(engine => engine.id === (saved?.engine || 'godot'));
   const engineChanged = saved && (saved.engine || 'godot') !== (draft?.engine || 'godot');
   const agentsByID = new Map(agents.map(agent => [agent.id, agent]));
-  const missingAgents = selectedMachine ? agents.filter(agent => saved?.steps.some(step => step.executor === agent.id) &&
-    !selectedMachine.executors.includes(agent.id)) : [];
-  const matchingProjects = selectedMachine?.projects.filter(id => (selectedMachine.project_engines?.[id] || 'godot') === savedEngine?.id) || [];
+  const missingAgents = machine ? agents.filter(agent => saved?.steps.some(step => step.executor === agent.id) &&
+    !machine.executors.includes(agent.id)) : [];
+  const matchingProjects = machine?.projects.filter(id => (machine.project_engines?.[id] || 'godot') === savedEngine?.id) || [];
   const availableForRun = !engineChanged && !missingAgents.length && savedEngine?.implemented && matchingProjects.includes(project) &&
-    (!saved?.steps.some(step => step.executor === 'engine' || step.executor === savedEngine.id) || selectedMachine?.executors.includes(savedEngine.id));
+    (!saved?.steps.some(step => step.executor === 'engine' || step.executor === savedEngine.id) || machine?.executors.includes(savedEngine.id));
   const engineName = (id = 'godot') => engines.find(engine => engine.id === id)?.name || id;
   const executorName = (id: string) => executors[id] || agentsByID.get(id)?.name || engineName(id);
   const executionEngine = engineName(execution?.workflow?.engine);
@@ -167,12 +164,16 @@ export default function Console() {
         <h1>制作工作台</h1>
         <section className="panel">
           <h2>执行机器</h2>
-          <div className="machines">{machines.length ? machines.map(item => <article key={item.id}><div className="line"><strong>{item.name}</strong><span className="state">{Date.now() - new Date(item.seen).getTime() < 45000 ? '在线' : '离线'}</span></div><p>{item.executors.map(executorName).join(' · ') || '等待 Runner 报告'}</p><p>{item.projects.map(id => id + ' · ' + engineName(item.project_engines?.[id])).join(' / ')}</p></article>) : <p>还没有登记 Runner。</p>}</div>
-          <form className="inline-form" onSubmit={event => { event.preventDefault(); void action(async () => {
-            const result = await api<{ token: string }>(token, '/machines', { name: machineName });
-            setEnrollment(result.token); setMachineName('');
-          }); }}><label>新机器名称<input value={machineName} onChange={event => setMachineName(event.target.value)} maxLength={80} required /></label><button disabled={busy}>登记机器</button></form>
-          {enrollment && <div className="enroll"><p>把此令牌存入执行机器的 Runner 令牌文件。</p><input aria-label="Runner 令牌" readOnly value={enrollment} onFocus={event => event.currentTarget.select()} /><button onClick={() => setEnrollment('')}>收起令牌</button></div>}
+          {machine ? <article className="machine">
+            <div className="line">
+              <strong>{machine.name}</strong>
+              <span className="state">{Date.now() - new Date(machine.seen).getTime() < 45000 ? '在线' : '离线'}</span>
+            </div>
+            <p>{machine.executors.map(executorName).join(' · ') || '等待 Runner 报告'}</p>
+            {machine.projects.length > 0 && <p>{machine.projects.map(id => id + ' · ' + engineName(machine.project_engines?.[id])).join(' / ')}</p>}
+          </article> : <p>{!machines ? '正在读取执行机器…' : machines.length === 0
+            ? '尚未配置执行机器。请在部署时接入 Runner。'
+            : '检测到多台执行机器。请在部署端配置一台机器后再启动工作流。'}</p>}
         </section>
 
         <section className="panel">
@@ -211,15 +212,19 @@ export default function Console() {
 
         <section className="panel">
           <h2>发起制作</h2>
-          {saved ? <form onSubmit={event => { event.preventDefault(); void action(async () => {
-            const result = await api<Execution>(token, '/executions', { id: newID(), workflow_id: saved.id, version: saved.version, machine_id: machine, project, brief, commit: baseCommit.trim() });
-            setExecution(undefined); setExecutionID(result.id); selectRun('');
-          }); }}>
+          {saved ? <form onSubmit={event => {
+            event.preventDefault();
+            if (!machine || !availableForRun) return;
+            void action(async () => {
+              const result = await api<Execution>(token, '/executions', { id: newID(), workflow_id: saved.id, version: saved.version, machine_id: machine.id, project, brief, commit: baseCommit.trim() });
+              setExecution(undefined); setExecutionID(result.id); selectRun('');
+            });
+          }}>
             <p>{saved.name} · v{saved.version} · {savedEngine?.name}</p>
             {engineChanged && <p>保存引擎变更后可启动工作流。</p>}
             {missingAgents.length > 0 && <p>此 Runner 尚未发现 {missingAgents.map(agent => agent.name).join('、')}。</p>}
             {savedEngine && !savedEngine.implemented && <p>{savedEngine.name} 适配器计划接入，当前可编辑和保存此流程。</p>}
-            <div className="fields"><label>执行机器<select value={machine} onChange={event => { setMachine(event.target.value); setProject(''); }} required><option value="">选择机器</option>{machines.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>项目<select value={project} onChange={event => setProject(event.target.value)} required><option value="">选择匹配引擎的项目</option>{matchingProjects.map(id => <option key={id}>{id}</option>)}</select></label><label>起始提交（选填）<input value={baseCommit} onChange={event => setBaseCommit(event.target.value)} placeholder="默认为本机 HEAD" /></label></div>
+            <div className="fields"><label>项目<select value={project} onChange={event => setProject(event.target.value)} disabled={!machine} required><option value="">选择匹配引擎的项目</option>{matchingProjects.map(id => <option key={id}>{id}</option>)}</select></label><label>起始提交（选填）<input value={baseCommit} onChange={event => setBaseCommit(event.target.value)} placeholder="默认为执行机器上的 HEAD" /></label></div>
             <label>游戏简报<textarea rows={4} value={brief} onChange={event => setBrief(event.target.value)} required /></label>
             <button className="primary" disabled={busy || !availableForRun}>启动工作流</button>
           </form> : <p>先选择已保存的工作流。</p>}
