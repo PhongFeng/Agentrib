@@ -11,9 +11,9 @@
 ## Mac 执行机器
 
 1. 安装 Git 和项目所选的引擎。Godot 项目需要 Godot 4 和对应的 Web 导出模板。在执行机器上安装并登录工作流所用的 Agent CLI。Go Runner 可以在服务器用 `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o agentrib-runner ./cmd/agentrib-runner` 构建。
-2. 在控制台登记执行机器，把一次性显示的 Runner 令牌保存到本机受限文件，权限 `0600`。将 `deploy/runner.example.json` 复制到本机并按实际路径调整。项目由本机配置映射到已有的 Godot Git 仓库。每个项目需提供一个可以用 Godot 无界面运行的 GDScript 测试入口；需要 Web 包时还应提交预设。
+2. 制作工作台使用一台执行机器。首次部署时，用操作员令牌向 `POST /api/v1/machines` 提交 `{"name":"Mac mini"}`，将响应中的 Runner 令牌 `token` 保存到执行机器上的受限文件，权限 `0600`。已有 Runner 可沿用原令牌。将 `deploy/runner.example.json` 复制到执行机器并按实际路径调整。项目由本机配置映射到已有的 Godot Git 仓库。每个项目需提供一个可以用 Godot 无界面运行的 GDScript 测试入口。需要 Web 包时还应提交预设。
 3. 在 `commands` 内填写各 CLI 的绝对路径，以便后台 Runner 找到它们。使用 `agentrib-runner -config /absolute/path/runner.json -check` 检查可用命令，再去掉 `-check` 启动并在网页观察心跳。常驻部署可将 `deploy/com.agentrib.runner.plist` 中的 `__STATE__` 替换为配置目录的绝对路径，放入用户的 `~/Library/LaunchAgents/`，从当前用户会话用 `launchctl bootstrap` 加载。
-4. 从游戏模板创建工作流，为每个 Agent 步骤分配执行者，再指定机器、项目和简报。检查开发步骤从上游提交开始，且开发提交、引擎测试报告和 QA 记录指向同一版本。导出包可以从运行详情下载。
+4. 从游戏模板创建工作流，为每个 Agent 步骤分配执行者，再选择项目、填写简报。控制台会把任务派给已配置的执行机器。检查开发步骤从上游提交开始，且开发提交、引擎测试报告和 QA 记录指向同一版本。导出包可以从运行详情下载。
 
 ## 编写产品文档
 
