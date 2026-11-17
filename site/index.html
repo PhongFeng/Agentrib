@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="在浏览器里用 AI Agent 协作开发游戏。在工作流中选择游戏引擎，组织界面、玩法、测试与交付。Godot 已接入，计划支持 Unreal Engine、Unity 和 Cocos。">
+  <meta name="description" content="在 Agentrib 控制台设计游戏制作工作流，在流程中选择引擎、指派 Agent 并设置步骤依赖。Agentrib 在接入的执行机器上调度任务，跟踪测试和交付结果。">
   <meta name="theme-color" content="#080d17">
   <meta property="og:title" content="Agentrib · 用 AI Agent 协作开发游戏">
-  <meta property="og:description" content="在浏览器编排游戏制作流程，让本机 Agent 分工开发、测试与交付。">
+  <meta property="og:description" content="在控制台设计游戏制作工作流，在流程中选择引擎、指派 Agent 并设置步骤依赖。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://www.agentrib.com/">
   <title>Agentrib · 用 AI Agent 协作开发游戏</title>
@@ -67,7 +67,7 @@
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);line-height:1.65}a{color:inherit;text-decoration:none}a:focus-visible{outline:2px solid var(--mint);outline-offset:5px}img{display:block}h1,h2,h3,p{margin:0}::selection{background:#65e1c7;color:#080d17}
     .wrap{width:min(var(--max),calc(100% - 80px));margin-inline:auto}.header{border-bottom:1px solid #1b283b}.nav{min-height:68px;display:flex;align-items:center;justify-content:space-between;gap:20px}.brand{display:inline-flex;align-items:center;gap:10px;font-size:22px;font-weight:750;letter-spacing:-.045em}.brand img{width:36px;height:24px}.brand strong{color:var(--mint);font-weight:inherit}.nav-links{display:flex;align-items:center;gap:27px;font-size:14px;color:var(--muted)}.nav-links a:hover,.foot a:hover{color:var(--mint)}.nav-links .repo{color:var(--ink)}
     .hero{background:radial-gradient(ellipse at 78% 37%,#182641 0,transparent 54%);border-bottom:1px solid #1b283b}.hero-inner{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center;padding-block:96px 102px}.hero h1{font-size:clamp(39px,4.6vw,65px);line-height:1.18;letter-spacing:-.045em;margin:15px 0 25px}.hero h1 span{display:block;color:var(--mint)}.hero .lead{color:var(--muted);font-size:17px;max-width:32em}.actions{margin-top:31px;display:flex;gap:12px;flex-wrap:wrap}.button{display:inline-flex;min-height:44px;align-items:center;justify-content:center;border-radius:8px;padding:9px 17px;font-size:14px;font-weight:680;border:1px solid var(--line)}.button.primary{background:var(--mint);border-color:var(--mint);color:#071b1b}.button.primary:hover{background:#a0f4e3}.button.secondary:hover{border-color:var(--mint)}
-    .board{border:1px solid #34435d;border-radius:18px;background:linear-gradient(145deg,#151f34,#0d1624 74%);box-shadow:0 26px 88px #02050a66;overflow:hidden}.board-head{padding:15px 21px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);font-size:13px;font-weight:650}.board-head small{color:var(--muted);font-size:12px;font-weight:500}.board-body{padding:20px 20px 23px}.board-body h2{font-size:21px;margin-bottom:17px;letter-spacing:-.025em}.jobs{list-style:none;padding:0;margin:0;display:grid;gap:8px}.job{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:11px;padding:9px 12px;border:1px solid #28364b;border-radius:8px;background:#0c1422}.job b{font-size:14px}.job span:last-child{color:var(--muted);font-size:12px;text-align:right}.job .mark{width:27px;height:27px;display:grid;place-items:center;border-radius:6px;background:#1e304a;color:var(--blue);font-size:11px;font-family:ui-monospace,monospace}.job:last-child .mark{background:#19383a;color:var(--mint)}.board-foot{color:var(--muted);font-size:12px;margin-top:16px}
+    .board{border:1px solid #34435d;border-radius:18px;background:linear-gradient(145deg,#151f34,#0d1624 74%);box-shadow:0 26px 88px #02050a66;overflow:hidden}.board-head{padding:15px 21px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);font-size:13px;font-weight:650}.board-head h2{font-size:15px;font-weight:inherit}.board-head small{color:var(--muted);font-size:12px;font-weight:500}.board-body{padding:20px 20px 23px}.jobs{list-style:none;padding:0;margin:0;display:grid;gap:8px}.job{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:11px;padding:9px 12px;border:1px solid #28364b;border-radius:8px;background:#0c1422}.job b{font-size:14px}.job span:last-child{color:var(--muted);font-size:12px;text-align:right}.job .mark{width:27px;height:27px;display:grid;place-items:center;border-radius:6px;background:#1e304a;color:var(--blue);font-size:11px;font-family:ui-monospace,monospace}.job:last-child .mark{background:#19383a;color:var(--mint)}.board-foot{color:var(--muted);font-size:12px;margin-top:16px}
     .section{padding-block:69px;border-bottom:1px solid #1b283b;scroll-margin-top:24px}.section h2{font-size:clamp(28px,3.2vw,41px);line-height:1.28;letter-spacing:-.035em;margin:10px 0 16px}.section .lead,.steps p{color:var(--muted)}.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:0;margin:30px 0 0;list-style:none;border-block:1px solid var(--line)}.steps li{padding:22px 22px 24px 0}.steps li+li{border-left:1px solid var(--line);padding-left:22px}.steps h3{font-size:17px;margin-bottom:8px}.steps p{font-size:14px}.foot{display:flex;justify-content:space-between;gap:24px;align-items:center;padding-block:26px;color:var(--muted);font-size:13px}.foot .brand{font-size:18px;color:var(--ink)}.foot .brand img{width:29px}.foot-links{display:flex;gap:21px;flex-wrap:wrap}
     @media(max-width:890px){.wrap{width:calc(100% - 48px)}.hero-inner{gap:27px;padding-block:73px}.hero .lead{font-size:15px}}@media(max-width:720px){.hero-inner{grid-template-columns:1fr;padding-block:58px;gap:31px}.hero h1{margin-bottom:17px}.section{padding-block:47px}.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.steps li:nth-child(3){border-left:0;padding-left:0}.steps li:nth-child(n+3){border-top:1px solid var(--line)}}@media(max-width:470px){.wrap{width:calc(100% - 32px)}.nav{min-height:57px}.nav-links{gap:14px;font-size:12px}.nav-links a:first-child{display:none}.hero-inner{padding-block:43px}.hero h1{font-size:38px}.board-body{padding:15px}.job{gap:6px;padding:8px;grid-template-columns:26px 1fr auto}.job .mark{width:23px;height:23px}.job b{font-size:13px}.job span:last-child{font-size:11px}.steps li,.steps li+li{padding-right:10px}.steps li:nth-child(even){padding-left:11px}.foot{align-items:flex-start}.foot-links{gap:10px 13px;justify-content:flex-end}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
   </style>
@@ -90,7 +90,7 @@
       <div class="hero-inner wrap">
         <div>
           <h1 id="intro-title">用 AI Agent 协作<span>开发游戏</span></h1>
-          <p class="lead">在浏览器选择游戏引擎，编排界面生成、玩法开发、测试与交付。Agentrib 将任务派给本机 Agent，并把日志、Git 提交和构建产物汇集到同一条工作流。</p>
+          <p class="lead">在控制台设计游戏制作工作流，在流程中选择引擎，为策划、设计、开发和 QA 分配 Agent。Agentrib 按步骤依赖把任务派到已接入的执行机器，让后续步骤接续上游提交，并跟踪测试和交付结果。</p>
           <div class="actions">
             <a class="button primary" href="/console/">打开控制台 →</a>
             <a class="button secondary" href="#projects">查看游戏作品</a>
@@ -98,14 +98,13 @@
         </div>
 
         <section class="board" aria-labelledby="board-title">
-          <div class="board-head"><span>游戏交付工作流</span><small>流程示例</small></div>
+          <div class="board-head"><h2 id="board-title">游戏交付工作流</h2><small>示例</small></div>
           <div class="board-body">
-            <h2 id="board-title">月面送电</h2>
             <ol class="jobs">
               <li class="job"><span class="mark" aria-hidden="true">01</span><b>编写产品文档</b><span>策划 Agent</span></li>
               <li class="job"><span class="mark" aria-hidden="true">02</span><b>生成游戏界面</b><span>设计 Agent</span></li>
               <li class="job"><span class="mark" aria-hidden="true">03</span><b>集成界面与实现玩法</b><span>开发 Agent</span></li>
-              <li class="job"><span class="mark" aria-hidden="true">04</span><b>回放关卡并导出</b><span>引擎适配器</span></li>
+              <li class="job"><span class="mark" aria-hidden="true">04</span><b>运行测试并导出</b><span>引擎适配器</span></li>
               <li class="job"><span class="mark" aria-hidden="true">05</span><b>审查并确认交付</b><span>QA Agent · 人工确认</span></li>
             </ol>
             <p class="board-foot">从开发提交追溯到测试证据和试玩版本。</p>
@@ -116,8 +115,8 @@
 
     <section class="section" id="workflow" aria-labelledby="workflow-title">
       <div class="wrap">
-        <h2 id="workflow-title">在浏览器组织制作流程</h2>
-        <p class="lead">为每个步骤选择 Agent、填写任务说明并设置前置依赖。</p>
+        <h2 id="workflow-title">在控制台设计工作流</h2>
+        <p class="lead">在工作流中选择游戏引擎，编排制作步骤，并配置任务说明、执行方式和依赖。</p>
         <ol class="steps">
           <li><h3>定需求</h3><p>把产品文档交给选定的 Agent，将文档提交传给后续步骤。</p></li>
           <li><h3>制作界面与玩法</h3><p>分别指派设计和开发 Agent，让后续步骤从前置提交继续。</p></li>
