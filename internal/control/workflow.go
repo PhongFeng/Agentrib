@@ -9,20 +9,20 @@ import (
 	"github.com/PhongFeng/Agentrib/internal/protocol"
 )
 
-var godotTemplate = protocol.Workflow{ID: "godot-game", Name: "Godot 游戏交付", Steps: []protocol.Step{
+var gameTemplate = protocol.Workflow{ID: "game-delivery", Name: "游戏制作与交付", Engine: protocol.DefaultEngine, Steps: []protocol.Step{
 	{ID: "brief", Name: "确认游戏简报", Role: "策划 / 制作人", Executor: "approval", DependsOn: []string{}},
 	{ID: "ui", Name: "生成游戏界面", Role: "界面设计", Executor: "minimax-code", DependsOn: []string{"brief"},
-		Prompt: "Implement the agreed Godot UI in reusable scenes, themes and assets. Include UI states and responsive layouts as required by the brief. Record scene paths, signals and integration notes in the project for the development step. Keep gameplay rules and level data separate."},
+		Prompt: "Implement the agreed UI in reusable components, scenes, themes and assets for the selected engine. Include UI states and responsive layouts as required by the brief. Record file paths and integration notes for the development step. Keep gameplay rules and level data separate."},
 	{ID: "build", Name: "集成界面与开发玩法", Role: "玩法程序", Executor: "codex", DependsOn: []string{"ui"}, BaseFrom: "ui",
-		Prompt: "Start from the UI commit and read its integration notes. Wire those Godot scenes and signals to the agreed gameplay, preserve level data separately, and document how to test the result."},
-	{ID: "tests", Name: "运行 Godot 测试并导出", Role: "构建与测试", Executor: "godot", DependsOn: []string{"build"}, BaseFrom: "build"},
+		Prompt: "Start from the UI commit and read its integration notes. Wire the UI to the agreed gameplay, keep level data separate, and document how to test the result with the selected engine."},
+	{ID: "tests", Name: "运行引擎测试并导出", Role: "构建与测试", Executor: "engine", DependsOn: []string{"build"}, BaseFrom: "build"},
 	{ID: "qa", Name: "独立验收", Role: "QA 负责人", Executor: "qoder-cn", DependsOn: []string{"tests"}, BaseFrom: "tests", ReadOnly: true,
-		Prompt: "Compare the UI integration, gameplay in the exact checked-out commit and Godot test evidence to the brief. Report pass, fail, or unverified for each criterion, with reproduction steps and a release recommendation. Review source and supplied test evidence with read-only tools."},
+		Prompt: "Compare the UI integration, gameplay in the exact checked-out commit and engine test evidence to the brief. Report pass, fail, or unverified for each criterion, with reproduction steps and a release recommendation. Review source and supplied test evidence with read-only tools."},
 	{ID: "release", Name: "确认交付版本", Role: "制作人 / 操作者", Executor: "approval", DependsOn: []string{"qa"}},
 }}
 
 func (a *API) template(w http.ResponseWriter, _ *http.Request) {
-	send(w, http.StatusOK, godotTemplate)
+	send(w, http.StatusOK, gameTemplate)
 }
 
 func (a *API) workflows(w http.ResponseWriter, r *http.Request) {
@@ -47,12 +47,16 @@ func validateWorkflow(workflow protocol.Workflow) error {
 	if !slugPattern.MatchString(workflow.ID) || !validText(workflow.Name, 120) || workflow.Version < 0 || len(workflow.Steps) < 1 || len(workflow.Steps) > 24 {
 		return errors.New("Provide a workflow ID, name, and 1–24 steps")
 	}
+	engine, known := protocol.FindEngine(protocol.EngineID(workflow.Engine))
+	if !known {
+		return errors.New("Unknown workflow engine")
+	}
 	steps := make(map[string]protocol.Step)
 	for _, step := range workflow.Steps {
 		if !slugPattern.MatchString(step.ID) || steps[step.ID].ID != "" || !validText(step.Name, 160) || !validText(step.Role, 100) {
 			return errors.New("Each step needs a unique ID, name, and role")
 		}
-		if step.Executor != "approval" && !validExecutor(step.Executor) {
+		if step.Executor != "approval" && step.Executor != "engine" && !agentExecutor(step.Executor) && step.Executor != engine.ID {
 			return fmt.Errorf("Unknown executor for %s", step.ID)
 		}
 		if len(step.Prompt) > 3000 || strings.ContainsRune(step.Prompt, 0) ||

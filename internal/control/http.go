@@ -43,6 +43,9 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
 	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.download))
 	mux.HandleFunc("GET /api/v1/workflows", a.asOperator(a.workflows))
+	mux.HandleFunc("GET /api/v1/engines", a.asOperator(func(w http.ResponseWriter, _ *http.Request) {
+		send(w, http.StatusOK, protocol.Engines)
+	}))
 	mux.HandleFunc("GET /api/v1/workflows/template", a.asOperator(a.template))
 	mux.HandleFunc("POST /api/v1/workflows", a.asOperator(a.saveWorkflow))
 	mux.HandleFunc("GET /api/v1/executions", a.asOperator(a.executions))
@@ -76,6 +79,8 @@ func response(w http.ResponseWriter, status int, value any, err error) {
 		send(w, status, value)
 	case errors.Is(err, store.ErrConflict):
 		problem(w, http.StatusConflict, "Run state or lease changed")
+	case errors.Is(err, store.ErrEngineUnavailable), errors.Is(err, store.ErrProjectEngine):
+		problem(w, http.StatusConflict, err.Error())
 	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == "23503":
 		problem(w, http.StatusNotFound, "Record not found")
 	default:
@@ -177,10 +182,12 @@ func (a *API) createRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func validSpec(spec protocol.Spec) bool {
+	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
+		known && engine.Implemented && (agentExecutor(spec.Executor) || spec.Executor == engine.ID) &&
 		(!spec.ReadOnly || spec.Executor != "minimax-code") &&
 		validText(spec.Title, 200) && len(spec.Prompt) <= 16000 && !strings.ContainsRune(spec.Prompt, 0) &&
-		(spec.Executor == "godot" || validText(spec.Prompt, 16000)) && (spec.Commit == "" || commitPattern.MatchString(spec.Commit))
+		(!agentExecutor(spec.Executor) || validText(spec.Prompt, 16000)) && (spec.Commit == "" || commitPattern.MatchString(spec.Commit))
 }
 
 func validText(s string, max int) bool {
@@ -188,7 +195,8 @@ func validText(s string, max int) bool {
 }
 
 func validExecutor(key string) bool {
-	return agentExecutor(key) || key == "godot"
+	engine, ok := protocol.FindEngine(key)
+	return agentExecutor(key) || ok && engine.Implemented
 }
 
 func agentExecutor(key string) bool {
@@ -230,7 +238,7 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 	if !read(w, r, &h) {
 		return
 	}
-	if len(h.Executors) > 4 || len(h.Projects) > 64 {
+	if len(h.Executors) > 3+len(protocol.Engines) || len(h.Projects) > 64 || len(h.ProjectEngines) > len(h.Projects) {
 		problem(w, http.StatusBadRequest, "Heartbeat too large")
 		return
 	}
@@ -240,9 +248,17 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 	}
+	projects := make(map[string]bool, len(h.Projects))
 	for _, key := range h.Projects {
 		if !slugPattern.MatchString(key) {
 			problem(w, http.StatusBadRequest, "Invalid project key")
+			return
+		}
+		projects[key] = true
+	}
+	for key, id := range h.ProjectEngines {
+		if _, ok := protocol.FindEngine(id); !ok || !projects[key] {
+			problem(w, http.StatusBadRequest, "Invalid project engine binding")
 			return
 		}
 	}

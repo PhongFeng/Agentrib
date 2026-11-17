@@ -22,15 +22,31 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		{ID: "brief", Name: "Brief", Executor: "approval"},
 		{ID: "ui", Name: "UI", Executor: "minimax-code", DependsOn: []string{"brief"}},
 		{ID: "build", Name: "Build", Executor: "codex", DependsOn: []string{"ui"}, BaseFrom: "ui"},
-		{ID: "test", Name: "Test", Executor: "godot", DependsOn: []string{"build"}, BaseFrom: "build"},
+		{ID: "test", Name: "Test", Executor: "engine", DependsOn: []string{"build"}, BaseFrom: "build"},
 		{ID: "review", Name: "Review", Executor: "qoder-cn", DependsOn: []string{"test"}, BaseFrom: "test", ReadOnly: true},
 		{ID: "publish", Name: "Publish", Executor: "approval", DependsOn: []string{"review"}},
 	}})
-	if err != nil || w.Version != 1 {
+	if err != nil || w.Version != 1 || w.Engine != "godot" {
 		t.Fatalf("save workflow: %+v %v", w, err)
 	}
 	id, _ := newID()
 	input := protocol.ExecutionInput{ID: id, WorkflowID: w.ID, Version: w.Version, MachineID: machine, Project: "moon", Brief: "Build a Godot room"}
+	planned := w
+	planned.ID, planned.Version, planned.Engine = "future", 0, "unity"
+	planned, err = db.SaveWorkflow(ctx, planned)
+	if err != nil || planned.Engine != "unity" {
+		t.Fatalf("save planned engine: %+v %v", planned, err)
+	}
+	blocked := input
+	blocked.WorkflowID, blocked.Version = planned.ID, planned.Version
+	if _, err := db.StartExecution(ctx, blocked); !errors.Is(err, ErrEngineUnavailable) {
+		t.Fatalf("execution accepted with no engine adapter: %v", err)
+	}
+	blocked = input
+	blocked.Project = "unregistered"
+	if _, err := db.StartExecution(ctx, blocked); !errors.Is(err, ErrProjectEngine) {
+		t.Fatalf("execution accepted without matching project: %v", err)
+	}
 	if _, err := db.StartExecution(ctx, input); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +78,9 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		job, err := db.Claim(ctx, machine)
 		if err != nil || job == nil || job.StepID != step {
 			t.Fatalf("claim %s: %+v %v", step, job, err)
+		}
+		if step == "test" && (job.Spec.Executor != "godot" || job.Spec.Engine != "godot") {
+			t.Fatalf("test job did not resolve to the chosen engine: %+v", job.Spec)
 		}
 		wantBase := map[string]string{"ui": "", "build": uiSHA, "test": sha, "review": sha}
 		if job.Spec.Commit != wantBase[step] {

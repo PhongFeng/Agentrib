@@ -13,6 +13,12 @@
 1. 安装 Git、Godot 4 和对应的 Web 导出模板，在 Mac 上安装并登录 MiniMax Code、Codex 和 Qoder CN。默认 Godot 模板需要这三个 Agent。Go Runner 可以在服务器用 `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o agentrib-runner ./cmd/agentrib-runner` 构建。
 2. 在控制台登记执行机器，把一次性显示的 Runner 令牌保存到本机受限文件，权限 `0600`。将 `deploy/runner.example.json` 复制到本机并按实际路径调整。项目由本机配置映射到已有的 Godot Git 仓库。每个项目需提供一个可以用 Godot 无界面运行的 GDScript 测试入口；需要 Web 包时还应提交预设。
 3. 在 `commands` 内填写各 CLI 的绝对路径，以便后台 Runner 找到它们。使用 `agentrib-runner -config /absolute/path/runner.json -check` 检查可用命令，再去掉 `-check` 启动并在网页观察心跳。常驻部署可将 `deploy/com.agentrib.runner.plist` 中的 `__STATE__` 替换为配置目录的绝对路径，放入用户的 `~/Library/LaunchAgents/`，从当前用户会话用 `launchctl bootstrap` 加载。
-4. 从 Godot 模板创建工作流，指定机器、项目和简报并确认。核对 Codex 从 MiniMax Code 的界面提交开始，开发提交、Godot 报告和 Qoder CN 的只读 QA 记录指向同一交付版本。导出包从运行详情下载，人工确认后可将其发布到独立试玩站点。
+4. 从游戏模板创建工作流，选择 Godot，指定机器、项目和简报并确认。核对 Codex 从 MiniMax Code 的界面提交开始，开发提交、Godot 报告和 Qoder CN 的只读 QA 记录指向同一交付版本。导出包从运行详情下载，人工确认后可将其发布到独立试玩站点。
+
+## 引擎适配
+
+工作流版本保存 `engine`。测试与导出步骤使用通用的 `engine` 执行方式，派单时解析为该版本选定的引擎。Runner 上报项目及其引擎，控制台筛选匹配的项目。较早的工作流与 Runner 项目配置默认使用 Godot，`godot_dir` 仍可作为旧项目的目录字段。新项目使用 `engine` 和可选的 `engine_dir`。
+
+接入新引擎时，注册引擎及其 Runner 适配器。适配器负责探测本机 CLI、校验项目配置和目录、在指定 Git 提交上运行测试和构建。测试输出使用 `test` 事件交给 QA，构建产物通过通用的产物接口回传。Godot 已实现这套接口。Unreal Engine、Unity 和 Cocos 的工作流可以预先保存，需等待各自的适配器后才能派单。
 
 Git 提交保存在项目本机的 `refs/agentrib/runs/`，可以按需要推送到项目自己的远程。运行日志与导出包中的内容可能来自项目代码，下载与查看均需要操作员令牌。

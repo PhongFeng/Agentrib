@@ -39,13 +39,20 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	if !exists {
 		return result, errors.New("project is missing from the local runner configuration")
 	}
+	engineID := protocol.EngineID(run.Spec.Engine)
+	engine, known := protocol.FindEngine(engineID)
+	adapter := r.engines[engineID]
+	if project.Engine != engineID || !known || adapter == nil {
+		return result, errors.New("selected engine does not match this Runner project")
+	}
+	engineBuild := run.Spec.Executor == engineID
 	checkout := filepath.Join(r.cfg.State, "worktrees", run.ID)
 	if err := os.MkdirAll(filepath.Dir(checkout), 0700); err != nil {
 		return result, err
 	}
 	base := run.Spec.Commit
 	if base == "" {
-		if run.Spec.ReadOnly || run.Spec.Executor == "godot" {
+		if run.Spec.ReadOnly || engineBuild {
 			return result, errors.New("verification requires the development commit")
 		}
 		base = "HEAD"
@@ -69,22 +76,17 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 			emit("diagnostic", "Temporary worktree cleanup failed")
 		}
 	}()
-	dir, err := contained(checkout, filepath.Join(checkout, project.GodotDir))
+	dir, err := contained(checkout, filepath.Join(checkout, project.EngineDir))
 	if err != nil {
 		return result, err
 	}
-	marker, err := contained(checkout, filepath.Join(dir, "project.godot"))
-	if err != nil {
-		return result, errors.New("Git checkout must contain a Godot project.godot")
-	}
-	info, err := os.Stat(marker)
-	if err != nil || !info.Mode().IsRegular() {
-		return result, errors.New("project.godot must be a regular file")
+	if err := adapter.ValidateDirectory(checkout, dir); err != nil {
+		return result, err
 	}
 	emit("status", "Checked out "+base)
 	result.Commit = base
-	if run.Spec.Executor == "godot" {
-		result.Artifacts, err = r.godot(ctx, run.ID, dir, project, emit)
+	if engineBuild {
+		result.Artifacts, err = adapter.Build(ctx, dir, filepath.Join(r.cfg.State, "artifacts", run.ID), project, emit)
 		return result, err
 	}
 	backend := r.backends[run.Spec.Executor]
@@ -95,7 +97,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	if run.Spec.ReadOnly {
 		mode = "Review the checked-out version. Do not change source files. Report findings and the evidence you used."
 	}
-	prompt := "This is an Agentrib Godot game task. " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
+	prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
 	if err := backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit); err != nil {
 		return result, err
 	}
@@ -133,14 +135,13 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	return result, nil
 }
 
-func (r *Runner) godot(ctx context.Context, id, dir string, project Project, emit Emit) ([]protocol.Artifact, error) {
-	if r.godotCommand == "" {
+func (g godotEngine) Build(ctx context.Context, dir, out string, project Project, emit Emit) ([]protocol.Artifact, error) {
+	if g.command == "" {
 		return nil, errors.New("Godot executable unavailable")
 	}
 	if _, err := contained(dir, filepath.Join(dir, project.TestScript)); err != nil {
 		return nil, fmt.Errorf("test script: %w", err)
 	}
-	out := filepath.Join(r.cfg.State, "artifacts", id)
 	if err := os.MkdirAll(out, 0700); err != nil {
 		return nil, err
 	}
@@ -152,11 +153,15 @@ func (r *Runner) godot(ctx context.Context, id, dir string, project Project, emi
 	defer log.Close()
 	execGodot := func(args ...string) error {
 		emit("tool", "godot "+strings.Join(args, " "))
-		cmd := command(ctx, dir, r.godotCommand, append([]string{"--headless", "--path", dir}, args...)...)
+		cmd := command(ctx, dir, g.command, append([]string{"--headless", "--path", dir}, args...)...)
+		kind := "godot"
+		if args[0] == "--script" {
+			kind = "test"
+		}
 		var scriptError bool
 		lines := &lineWriter{writeLine: func(s string) {
 			_, _ = fmt.Fprintln(log, s)
-			emit("godot", s)
+			emit(kind, s)
 			scriptError = scriptError || strings.Contains(s, "SCRIPT ERROR:") || strings.Contains(s, "Parse Error:")
 		}}
 		cmd.Stdout, cmd.Stderr = lines, lines

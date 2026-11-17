@@ -3,11 +3,12 @@ package protocol
 import "time"
 
 type Machine struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Executors []string  `json:"executors"`
-	Projects  []string  `json:"projects"`
-	Seen      time.Time `json:"seen"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Executors      []string          `json:"executors"`
+	Projects       []string          `json:"projects"`
+	ProjectEngines map[string]string `json:"project_engines,omitempty"`
+	Seen           time.Time         `json:"seen"`
 }
 
 type Enrollment struct {
@@ -16,13 +17,15 @@ type Enrollment struct {
 }
 
 type Heartbeat struct {
-	Executors []string `json:"executors"`
-	Projects  []string `json:"projects"`
+	Executors      []string          `json:"executors"`
+	Projects       []string          `json:"projects"`
+	ProjectEngines map[string]string `json:"project_engines,omitempty"`
 }
 
 type Spec struct {
 	MachineID string `json:"machine_id"`
 	Project   string `json:"project"`
+	Engine    string `json:"engine,omitempty"`
 	Executor  string `json:"executor"`
 	Title     string `json:"title"`
 	Prompt    string `json:"prompt"`

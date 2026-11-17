@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS machines (
     seen timestamptz NOT NULL DEFAULT 'epoch'
 );
 
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS project_engines jsonb NOT NULL DEFAULT '{}';
+
 CREATE TABLE IF NOT EXISTS runs (
     id text PRIMARY KEY,
     machine_id text NOT NULL REFERENCES machines(id),

@@ -9,10 +9,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/PhongFeng/Agentrib/internal/protocol"
 )
 
 type Project struct {
 	Repository string `json:"repository"`
+	Engine     string `json:"engine,omitempty"`
+	EngineDir  string `json:"engine_dir,omitempty"`
 	GodotDir   string `json:"godot_dir,omitempty"`
 	TestScript string `json:"test_script,omitempty"`
 	WebPreset  string `json:"web_preset,omitempty"`
@@ -52,10 +56,21 @@ func Load(path string) (Config, error) {
 		return c, errors.New("provide an absolute state directory and 1–64 projects")
 	}
 	for key, project := range c.Projects {
-		if !projectKey.MatchString(key) || !filepath.IsAbs(project.Repository) || !safeRelative(project.GodotDir) ||
-			!safeRelative(project.TestScript) || !strings.HasSuffix(project.TestScript, ".gd") {
-			return c, fmt.Errorf("invalid configuration for project %q (repository and Godot test script are required)", key)
+		project.Engine = protocol.EngineID(project.Engine)
+		if project.EngineDir == "" && project.Engine == protocol.DefaultEngine {
+			project.EngineDir = project.GodotDir
 		}
+		if !projectKey.MatchString(key) || !filepath.IsAbs(project.Repository) || !safeRelative(project.EngineDir) {
+			return c, fmt.Errorf("invalid repository or engine directory for project %q", key)
+		}
+		adapter, ok := engineAdapters[project.Engine]
+		if !ok {
+			return c, fmt.Errorf("project %q has no adapter for engine %q", key, project.Engine)
+		}
+		if err := adapter.create("").ValidateConfig(project); err != nil {
+			return c, fmt.Errorf("invalid configuration for project %q: %w", key, err)
+		}
+		c.Projects[key] = project
 	}
 	c.token = strings.TrimSpace(os.Getenv("AGENTRIB_RUNNER_TOKEN"))
 	if c.token == "" {
