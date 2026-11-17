@@ -42,22 +42,25 @@
     }
     .project-card {
       display: grid;
-      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
       align-items: center;
       overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 14px;
       background: var(--panel);
     }
-    .project-card img {
+    .project-art {
       width: 100%;
       height: auto;
     }
     .project-content { padding: clamp(20px, 4vw, 48px); }
     .project-content h3 { font-size: clamp(22px, 3vw, 32px); }
-    .project-content p { margin-top: 6px; color: var(--muted); }
+    .project-content p { margin-top: 6px; color: var(--muted); max-width: 25em; }
     .projects-note { margin-top: 18px; color: var(--muted); font-size: 14px; }
-    @media (max-width: 620px) { .project-card { grid-template-columns: minmax(0, 1fr); } }
+    @media (min-width: 621px) {
+      .project-art, .project-content { grid-area: 1 / 1; }
+      .project-art { aspect-ratio: 3 / 1; object-fit: cover; object-position: right center; }
+      .project-content { max-width: 60%; }
+    }
     @media (max-width: 890px) { .engine-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 470px) { .engine-list { grid-template-columns: 1fr; } }
     :root{color-scheme:dark;--bg:#080d17;--panel:#111a2a;--line:#26344b;--ink:#f0f5fd;--muted:#a2aec3;--mint:#65e1c7;--blue:#90b5ff;--max:1140px;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
@@ -108,24 +111,6 @@
             <p class="board-foot">从开发提交追溯到测试证据和试玩版本。</p>
           </div>
         </section>
-      </div>
-    </section>
-
-    <section class="section" id="projects" aria-labelledby="projects-title">
-      <div class="wrap">
-        <h2 id="projects-title">游戏作品</h2>
-        <ul class="project-list">
-          <li>
-            <article class="project-card">
-              <img src="./projects/moon-power.png" alt="《月面送电》的月面棋盘、能量箱与供电节点" width="1260" height="820" loading="lazy" decoding="async">
-              <div class="project-content">
-                <h3>《月面送电》</h3>
-                <p>10 关 2D 推箱解谜。把能量箱推到供电节点，逐步点亮月面基地。</p>
-              </div>
-            </article>
-          </li>
-        </ul>
-        <p class="projects-note">更多作品将陆续展示。已发布的版本会在这里提供网页入口或客户端下载链接。</p>
       </div>
     </section>
 
@@ -197,6 +182,24 @@
           <li>MiniMax Code <code>mcode</code></li>
           <li>ZCode <code>zcode</code></li>
         </ul>
+      </div>
+    </section>
+
+    <section class="section" id="projects" aria-labelledby="projects-title">
+      <div class="wrap">
+        <h2 id="projects-title">游戏作品</h2>
+        <ul class="project-list">
+          <li>
+            <article class="project-card">
+              <img class="project-art" src="./projects/moon-power-cover.png" alt="月面基地的太阳能阵列，远处可见地球" width="1774" height="887" loading="lazy" decoding="async">
+              <div class="project-content">
+                <h3>《月面送电》</h3>
+                <p>10 关 2D 推箱解谜。把能量箱推到供电节点，逐步点亮月面基地。</p>
+              </div>
+            </article>
+          </li>
+        </ul>
+        <p class="projects-note">更多作品将陆续展示。已发布的版本会在这里提供网页入口或客户端下载链接。</p>
       </div>
     </section>
   </main>
