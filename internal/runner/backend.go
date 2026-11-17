@@ -23,12 +23,17 @@ type Backend interface {
 
 type Codex struct{ command string }
 type QoderCN struct{ command string }
+type MiniMaxCode struct{ command string }
 
 func (c Codex) Probe(ctx context.Context) error {
 	return command(ctx, "", c.command, "login", "status").Run()
 }
 func (q QoderCN) Probe(ctx context.Context) error {
 	return command(ctx, "", q.command, "--version").Run()
+}
+
+func (m MiniMaxCode) Probe(ctx context.Context) error {
+	return command(ctx, "", m.command, "--version").Run()
 }
 
 func (c Codex) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) error {
@@ -44,7 +49,7 @@ func (c Codex) Execute(ctx context.Context, directory, prompt string, readOnly b
 func (q QoderCN) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) error {
 	args := []string{"-p", "--output-format", "stream-json"}
 	if readOnly {
-		args = append(args, "--allowed-tools", "Read,Glob,Grep")
+		args = append(args, "--tools=Read,Glob,Grep", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
 	} else {
 		args = append(args, "--permission-mode", "accept_edits")
 	}
@@ -56,6 +61,63 @@ func (q QoderCN) Execute(ctx context.Context, directory, prompt string, readOnly
 		}
 	}, emit)
 	return errors.Join(err, resultErr)
+}
+
+func (m MiniMaxCode) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) error {
+	if readOnly {
+		return errors.New("MiniMax Code does not support read-only Agentrib steps")
+	}
+	input, err := json.Marshal(map[string]string{"prompt": prompt})
+	if err != nil {
+		return err
+	}
+	cmd := command(ctx, directory, m.command, "exec", "--permission", "smart",
+		"--input", "-", "--input-format", "json", "--output-format", "stream-json")
+	var status string
+	err = stream(cmd, string(input), func(line string) {
+		if completed := parseMiniMax(line, emit); completed != "" {
+			status = completed
+		}
+	}, emit)
+	if status == "" && err == nil {
+		return errors.New("MiniMax Code exited without a terminal result")
+	}
+	if status != "" && status != "succeeded" {
+		return errors.Join(err, fmt.Errorf("MiniMax Code reported %s", status))
+	}
+	return err
+}
+
+func parseMiniMax(line string, emit Emit) string {
+	var event struct {
+		Type string
+		Item struct {
+			Type, Content string
+			ToolCall      struct{ Name string }
+		}
+		Result struct {
+			Status string
+			Error  struct{ Message string }
+		}
+	}
+	if json.Unmarshal([]byte(line), &event) != nil {
+		return ""
+	}
+	switch event.Type {
+	case "item.completed":
+		switch event.Item.Type {
+		case "agent_message":
+			emit("agent", event.Item.Content)
+		case "tool_call":
+			emit("tool", event.Item.ToolCall.Name)
+		}
+	case "exec.completed":
+		if event.Result.Error.Message != "" {
+			emit("error", event.Result.Error.Message)
+		}
+		return event.Result.Status
+	}
+	return ""
 }
 
 func command(ctx context.Context, dir, name string, args ...string) *exec.Cmd {

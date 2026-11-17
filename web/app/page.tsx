@@ -10,7 +10,7 @@ type Run = { id: string; step_id?: string; status: string; spec: { title: string
 type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[] };
 type RunEvent = { seq: number; kind: string; text: string };
 
-const executors = { approval: '人工确认', codex: 'Codex', 'qoder-cn': 'Qoder CN', godot: 'Godot' };
+const executors: Record<string, string> = { approval: '人工确认', 'minimax-code': 'MiniMax Code', codex: 'Codex', 'qoder-cn': 'Qoder CN', godot: 'Godot' };
 const label: Record<string, string> = { queued: '排队', claimed: '已领取', running: '运行中', canceling: '取消中', failed: '失败', lost: '失联', canceled: '已取消', succeeded: '已通过', waiting: '等待依赖', ready: '等待确认' };
 
 function newID() { return crypto.randomUUID().replaceAll('-', ''); }
@@ -152,7 +152,7 @@ export default function Console() {
         <h1>制作工作台</h1>
         <section className="panel">
           <h2>执行机器</h2>
-          <div className="machines">{machines.length ? machines.map(item => <article key={item.id}><div className="line"><strong>{item.name}</strong><span className="state">{Date.now() - new Date(item.seen).getTime() < 45000 ? '在线' : '离线'}</span></div><p>{item.executors.map(key => executors[key as keyof typeof executors] || key).join(' · ') || '等待 Runner 报告'}</p><p>{item.projects.join(' · ')}</p></article>) : <p>还没有登记 Runner。</p>}</div>
+          <div className="machines">{machines.length ? machines.map(item => <article key={item.id}><div className="line"><strong>{item.name}</strong><span className="state">{Date.now() - new Date(item.seen).getTime() < 45000 ? '在线' : '离线'}</span></div><p>{item.executors.map(key => executors[key] || key).join(' · ') || '等待 Runner 报告'}</p><p>{item.projects.join(' · ')}</p></article>) : <p>还没有登记 Runner。</p>}</div>
           <form className="inline-form" onSubmit={event => { event.preventDefault(); void action(async () => {
             const result = await api<{ token: string }>(token, '/machines', { name: machineName });
             setEnrollment(result.token); setMachineName('');
@@ -172,7 +172,8 @@ export default function Console() {
               <legend>{step.id || '新步骤'}</legend>
               <div className="fields"><label>标识<input value={step.id} onChange={event => updateStep(index, { id: event.target.value })} /></label><label>名称<input value={step.name} onChange={event => updateStep(index, { name: event.target.value })} /></label><label>角色<input value={step.role} onChange={event => updateStep(index, { role: event.target.value })} /></label><label>执行方式<select value={step.executor} onChange={event => updateStep(index, { executor: event.target.value, read_only: false })}>{Object.entries(executors).map(([key, name]) => <option key={key} value={key}>{name}</option>)}</select></label></div>
               <div className="fields"><label>前置步骤（逗号分隔）<input value={(step.depends_on || []).join(',')} onChange={event => updateStep(index, { depends_on: event.target.value.split(',') })} /></label><label>提交来源<select value={step.base_from || ''} onChange={event => updateStep(index, { base_from: event.target.value })}><option value="">项目起始提交</option>{(step.depends_on || []).map((id, i) => id.trim() && <option key={i} value={id.trim()}>{id.trim()}</option>)}</select></label></div>
-              {(step.executor === 'codex' || step.executor === 'qoder-cn') && <><label>任务说明<textarea value={step.prompt || ''} onChange={event => updateStep(index, { prompt: event.target.value })} /></label><label className="check"><input type="checkbox" checked={step.read_only || false} onChange={event => updateStep(index, { read_only: event.target.checked })} />只读验收</label></>}
+              {step.executor !== 'approval' && step.executor !== 'godot' && <label>任务说明<textarea value={step.prompt || ''} onChange={event => updateStep(index, { prompt: event.target.value })} /></label>}
+              {(step.executor === 'codex' || step.executor === 'qoder-cn') && <label className="check"><input type="checkbox" checked={step.read_only || false} onChange={event => updateStep(index, { read_only: event.target.checked })} />只读验收</label>}
               <button className="text-button" disabled={draft.steps.length === 1} onClick={() => setDraft({ ...draft, steps: draft.steps.filter((_, i) => i !== index) })}>移除步骤</button>
             </fieldset>)}</div>
             <div className="actions"><button onClick={() => setDraft({ ...draft, steps: [...draft.steps, { id: 'step-' + newID().slice(0, 6), name: '', role: '', executor: 'codex', depends_on: [] }] })}>添加步骤</button><button className="primary" disabled={busy} onClick={() => void action(async () => {
@@ -202,7 +203,7 @@ export default function Console() {
             const current = execution.runs?.find(item => item.step_id === step.id);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
-            return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {label[status] || status}</p></div><div className="actions">
+            return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {executors[step.executor] || step.executor} · {label[status] || status}</p></div><div className="actions">
               {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
             </div></li>;

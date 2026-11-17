@@ -10,9 +10,9 @@
 
 ## Mac 执行机器
 
-1. 安装 Git、Godot 4 和对应的 Web 导出模板，在 Mac 上安装并登录 Codex。需要使用 Qoder CN 时可以另外安装并登录。Go Runner 可以在服务器用 `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o agentrib-runner ./cmd/agentrib-runner` 构建。
+1. 安装 Git、Godot 4 和对应的 Web 导出模板，在 Mac 上安装并登录 MiniMax Code、Codex 和 Qoder CN。默认 Godot 模板需要这三个 Agent。Go Runner 可以在服务器用 `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o agentrib-runner ./cmd/agentrib-runner` 构建。
 2. 在控制台登记执行机器，把一次性显示的 Runner 令牌保存到本机受限文件，权限 `0600`。将 `deploy/runner.example.json` 复制到本机并按实际路径调整。项目由本机配置映射到已有的 Godot Git 仓库。每个项目需提供一个可以用 Godot 无界面运行的 GDScript 测试入口；需要 Web 包时还应提交预设。
-3. 使用 `agentrib-runner -config /absolute/path/runner.json -check` 检查可用命令，再去掉 `-check` 启动并在网页观察心跳。常驻部署可将 `deploy/com.agentrib.runner.plist` 中的 `__STATE__` 替换为配置目录的绝对路径，放入用户的 `~/Library/LaunchAgents/`，从当前用户会话用 `launchctl bootstrap` 加载。
-4. 从 Godot 模板创建工作流，指定机器、项目和简报并确认。核对开发 Git SHA、Godot 报告和只读 QA 记录指向相同提交。导出包从运行详情下载，人工确认后可将其发布到独立试玩站点。
+3. 在 `commands` 内填写各 CLI 的绝对路径，以便后台 Runner 找到它们。使用 `agentrib-runner -config /absolute/path/runner.json -check` 检查可用命令，再去掉 `-check` 启动并在网页观察心跳。常驻部署可将 `deploy/com.agentrib.runner.plist` 中的 `__STATE__` 替换为配置目录的绝对路径，放入用户的 `~/Library/LaunchAgents/`，从当前用户会话用 `launchctl bootstrap` 加载。
+4. 从 Godot 模板创建工作流，指定机器、项目和简报并确认。核对 Codex 从 MiniMax Code 的界面提交开始，开发提交、Godot 报告和 Qoder CN 的只读 QA 记录指向同一交付版本。导出包从运行详情下载，人工确认后可将其发布到独立试玩站点。
 
 Git 提交保存在项目本机的 `refs/agentrib/runs/`，可以按需要推送到项目自己的远程。运行日志与导出包中的内容可能来自项目代码，下载与查看均需要操作员令牌。

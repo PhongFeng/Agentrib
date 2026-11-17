@@ -11,11 +11,13 @@ import (
 
 var godotTemplate = protocol.Workflow{ID: "godot-game", Name: "Godot 游戏交付", Steps: []protocol.Step{
 	{ID: "brief", Name: "确认游戏简报", Role: "策划 / 制作人", Executor: "approval", DependsOn: []string{}},
-	{ID: "build", Name: "实现游戏任务", Role: "玩法程序", Executor: "codex", DependsOn: []string{"brief"},
-		Prompt: "Implement the agreed Godot requirements. Keep level data separate from gameplay code and document how to verify the changes."},
+	{ID: "ui", Name: "生成游戏界面", Role: "界面设计", Executor: "minimax-code", DependsOn: []string{"brief"},
+		Prompt: "Implement the agreed Godot UI in reusable scenes, themes and assets. Include UI states and responsive layouts as required by the brief. Record scene paths, signals and integration notes in the project for the development step. Keep gameplay rules and level data separate."},
+	{ID: "build", Name: "集成界面与开发玩法", Role: "玩法程序", Executor: "codex", DependsOn: []string{"ui"}, BaseFrom: "ui",
+		Prompt: "Start from the UI commit and read its integration notes. Wire those Godot scenes and signals to the agreed gameplay, preserve level data separately, and document how to test the result."},
 	{ID: "tests", Name: "运行 Godot 测试并导出", Role: "构建与测试", Executor: "godot", DependsOn: []string{"build"}, BaseFrom: "build"},
-	{ID: "qa", Name: "独立验收", Role: "QA 负责人", Executor: "codex", DependsOn: []string{"tests"}, BaseFrom: "tests", ReadOnly: true,
-		Prompt: "Compare the exact checked-out commit and Godot test evidence to the brief. Report pass, fail, or unverified for each criterion, with reproduction steps and a release recommendation."},
+	{ID: "qa", Name: "独立验收", Role: "QA 负责人", Executor: "qoder-cn", DependsOn: []string{"tests"}, BaseFrom: "tests", ReadOnly: true,
+		Prompt: "Compare the UI integration, gameplay in the exact checked-out commit and Godot test evidence to the brief. Report pass, fail, or unverified for each criterion, with reproduction steps and a release recommendation. Review source and supplied test evidence with read-only tools."},
 	{ID: "release", Name: "确认交付版本", Role: "制作人 / 操作者", Executor: "approval", DependsOn: []string{"qa"}},
 }}
 
@@ -54,8 +56,11 @@ func validateWorkflow(workflow protocol.Workflow) error {
 			return fmt.Errorf("Unknown executor for %s", step.ID)
 		}
 		if len(step.Prompt) > 3000 || strings.ContainsRune(step.Prompt, 0) ||
-			(step.Executor == "codex" || step.Executor == "qoder-cn") && strings.TrimSpace(step.Prompt) == "" {
+			agentExecutor(step.Executor) && strings.TrimSpace(step.Prompt) == "" {
 			return fmt.Errorf("Invalid Agent instructions for %s", step.ID)
+		}
+		if step.Executor == "minimax-code" && step.ReadOnly {
+			return fmt.Errorf("MiniMax Code does not support read-only step %s", step.ID)
 		}
 		steps[step.ID] = step
 	}

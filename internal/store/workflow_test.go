@@ -15,12 +15,13 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	machine := enrollment.Machine.ID
-	if err := db.Heartbeat(ctx, machine, protocol.Heartbeat{Executors: []string{"codex", "godot", "qoder-cn"}, Projects: []string{"moon"}}); err != nil {
+	if err := db.Heartbeat(ctx, machine, protocol.Heartbeat{Executors: []string{"minimax-code", "codex", "godot", "qoder-cn"}, Projects: []string{"moon"}}); err != nil {
 		t.Fatal(err)
 	}
 	w, err := db.SaveWorkflow(ctx, protocol.Workflow{ID: "moon", Name: "Moon", Steps: []protocol.Step{
 		{ID: "brief", Name: "Brief", Executor: "approval"},
-		{ID: "build", Name: "Build", Executor: "codex", DependsOn: []string{"brief"}},
+		{ID: "ui", Name: "UI", Executor: "minimax-code", DependsOn: []string{"brief"}},
+		{ID: "build", Name: "Build", Executor: "codex", DependsOn: []string{"ui"}, BaseFrom: "ui"},
 		{ID: "test", Name: "Test", Executor: "godot", DependsOn: []string{"build"}, BaseFrom: "build"},
 		{ID: "review", Name: "Review", Executor: "qoder-cn", DependsOn: []string{"test"}, BaseFrom: "test", ReadOnly: true},
 		{ID: "publish", Name: "Publish", Executor: "approval", DependsOn: []string{"review"}},
@@ -50,7 +51,8 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("e", 40)
-	for _, step := range []string{"build", "test", "review"} {
+	uiSHA := strings.Repeat("a", 40)
+	for _, step := range []string{"ui", "build", "test", "review"} {
 		if err := db.Schedule(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +63,8 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		if err != nil || job == nil || job.StepID != step {
 			t.Fatalf("claim %s: %+v %v", step, job, err)
 		}
-		if step != "build" && job.Spec.Commit != sha {
+		wantBase := map[string]string{"ui": "", "build": uiSHA, "test": sha, "review": sha}
+		if job.Spec.Commit != wantBase[step] {
 			t.Fatalf("step %s commit: %s", step, job.Spec.Commit)
 		}
 		if step == "review" && (!strings.Contains(job.Spec.Prompt, "PASS 1/10") || strings.Contains(job.Spec.Prompt, "Export progress")) {
@@ -71,6 +74,9 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 			t.Fatal(err)
 		}
 		report := protocol.Report{Lease: job.Lease, Result: &protocol.Result{Status: "succeeded", Detail: "complete", Commit: sha}}
+		if step == "ui" {
+			report.Result.Commit = uiSHA
+		}
 		if step == "test" {
 			report.Events = []protocol.Event{
 				{Seq: 1, Kind: "tool", Text: "godot --script res://test.gd"},
@@ -92,7 +98,7 @@ func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	e, err := db.Execution(ctx, id)
-	if err != nil || e.Status != "succeeded" || e.Workflow.Name != "Moon" || len(e.Runs) != 3 {
+	if err != nil || e.Status != "succeeded" || e.Workflow.Name != "Moon" || len(e.Runs) != 4 {
 		t.Fatalf("finished execution: %+v %v", e, err)
 	}
 }
