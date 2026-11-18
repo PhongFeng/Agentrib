@@ -39,3 +39,23 @@ DeepSeek Harness 使用支持 `--profile headless` 的版本。使用 DeepSeek �
 接入新引擎时，注册引擎及其 Runner 适配器。适配器负责探测本机 CLI、校验项目配置和目录、在指定 Git 提交上运行测试和构建。测试输出使用 `test` 事件交给 QA，构建产物通过通用的产物接口回传。Godot 已实现这套接口。Unreal Engine、Unity 和 Cocos 的工作流可以预先保存，需等待各自的适配器后才能派单。
 
 Git 提交保存在项目本机的 `refs/agentrib/runs/`，可以按需要推送到项目自己的远程。要让下一次制作沿用某次运行的成果，先将该提交合并到项目当前分支。运行日志与导出包中的内容可能来自项目代码，下载与查看均需要操作员令牌。
+
+## 发布保留与定期清理
+
+站点发布统一使用 `deploy/publish-site.sh`：
+
+```
+sudo bash deploy/publish-site.sh <仓库目录> [console.tgz] [保留份数=3]
+```
+
+脚本先把现有 webroot 快照到 `/var/backups/agentrib/`，再把仓库 `site/engines`、`site/projects` 复制到 `/var/www/agentrib-site-releases/site-<时间戳>/`，通过符号链接原子切换。`index.html`、`favicon.svg` 经 `tr -d '\r'` 规范化后原子替换，因此 Windows CRLF 检出与 Linux LF 检出的发布结果一致。传入 `console.tgz` 时同时把控制台发布到 `/var/www/agentrib-console-releases/console-<时间戳>/`，校验 `index.html` 与 `_next/static` 后切换 `console` 符号链接。
+
+保留份数默认 3：站点 release、控制台 release、备份 tar 与目标记录都只保留最新 N 份，当前生效的 release 永不删除。发布后用 `curl --resolve` 校验 `/healthz`、`/`（以及 `/console/`）返回 200。
+
+测试与构建临时目录使用 `deploy/clean-scratch.sh` 定期清理：
+
+```
+bash deploy/clean-scratch.sh <目录> [天数=7] [保护名...]
+```
+
+脚本只删除目录、不碰文件，按 mtime 超过指定天数清理；命令行保护名以及 `<目录>/runner.json` 中引用的路径始终保留。Mac 端把 `deploy/com.agentrib.cleanup.plist` 中的 `__STATE__` 替换为状态目录绝对路径后放入 `~/Library/LaunchAgents/`，用 `launchctl bootstrap` 加载，每天 04:30 清理状态目录并保护 `projects worktrees artifacts bin tools`。服务器端用 cron 每天 04:45 以 `sudo -n` 清理部署工作区，保护 `build` 以及动态枚举的 `repository-*`、`moon-delivery-*`，日志写入 `~/agentrib-cleanup.log`。
