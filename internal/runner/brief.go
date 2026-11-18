@@ -11,14 +11,16 @@ import (
 	"github.com/PhongFeng/Agentrib/internal/protocol"
 )
 
-func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prompt string, emit Emit) (string, error) {
+func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prompt string, readOnly bool, emit Emit) (string, error) {
 	var answer string
+	var lastMessage string
 	var output strings.Builder
 	log := func(kind, text string) {
 		switch kind {
 		case "result":
 			answer = text
 		case "agent":
+			lastMessage = text
 			if output.Len() <= protocol.MaxBriefBytes {
 				output.WriteString(text[:min(len(text), protocol.MaxBriefBytes+1)])
 				output.WriteByte('\n')
@@ -34,7 +36,7 @@ func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prom
 		}
 		defer os.RemoveAll(tmp)
 		path := filepath.Join(tmp, "reply.txt")
-		if err := codex.execute(ctx, dir, prompt, true, log, "--output-last-message", path); err != nil {
+		if err := codex.execute(ctx, dir, prompt, readOnly, log, "--output-last-message", path); err != nil {
 			return "", err
 		}
 		file, err := os.Open(path)
@@ -48,11 +50,15 @@ func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prom
 		}
 		answer = string(body)
 	} else {
-		if err := backend.Execute(ctx, dir, prompt, true, log); err != nil {
+		if err := backend.Execute(ctx, dir, prompt, readOnly, log); err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(answer) == "" {
-			answer = output.String()
+			if readOnly {
+				answer = output.String()
+			} else {
+				answer = lastMessage
+			}
 		}
 	}
 	if len(answer) > protocol.MaxBriefBytes {

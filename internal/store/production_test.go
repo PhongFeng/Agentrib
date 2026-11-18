@@ -201,12 +201,12 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 		t.Fatal(err)
 	}
 	mid := machine.Machine.ID
-	if err := db.Heartbeat(ctx, mid, protocol.Heartbeat{Executors: []string{"godot", "qoder-cn"}, Projects: []string{"moon"}, ProductionWorkflow: true}); err != nil {
+	if err := db.Heartbeat(ctx, mid, protocol.Heartbeat{Executors: []string{"godot", "qoder-cn", "minimax-code"}, Projects: []string{"moon"}, ProductionWorkflow: true, WorkflowReview: true}); err != nil {
 		t.Fatal(err)
 	}
 	workflow, err := db.SaveWorkflow(ctx, protocol.Workflow{ID: "repair", Name: "Repair", Steps: []protocol.Step{
-		{ID: "develop", Executor: "qoder-cn", Prompt: "Implement feature"},
-		{ID: "ci", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true},
+		{ID: "develop", Executor: "qoder-cn", Prompt: "Implement feature", Preflight: true},
+		{ID: "ci", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true, CIRepairAgent: "minimax-code"},
 		{ID: "qa", Executor: "qoder-cn", DependsOn: []string{"ci"}, BaseFrom: "ci", ReadOnly: true, QAGate: true},
 	}})
 	if err != nil {
@@ -242,9 +242,14 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 		}
 	}
 	bad, fixed := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	report(claim("develop"), "succeeded", bad)
+	develop := claim("develop")
+	if !develop.Spec.Preflight {
+		t.Fatal("development missing engine preflight")
+	}
+	report(develop, "succeeded", bad)
 	ci := claim("ci")
-	report(ci, "failed", bad, protocol.Event{Seq: 1, Kind: "godot", Text: "No export template installed"})
+	report(ci, "failed", bad, protocol.Event{Seq: 1, Kind: "tool", Text: "godot --export-release Web index.html"},
+		protocol.Event{Seq: 2, Kind: "godot", Text: "No export template installed"})
 	tick()
 	if execution, err := db.Execution(ctx, eid); err != nil || execution.Status != "failed" || len(execution.Runs) != 2 {
 		t.Fatalf("an environment error unexpectedly scheduled a repair: %+v %v", execution, err)
@@ -253,12 +258,13 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 		t.Fatal(err)
 	}
 	ci = claim("ci")
-	report(ci, "failed", bad, protocol.Event{Seq: 1, Kind: "test", Text: "FAIL save-code round trip"})
+	report(ci, "failed", bad, protocol.Event{Seq: 1, Kind: "tool", Text: "godot --export-release Web index.html"},
+		protocol.Event{Seq: 2, Kind: "godot", Text: "The Web export preset references an invalid resource"})
 	tick()
 	tick()
 	repair := claim("ci:repair")
-	if repair.Spec.RepairOf != ci.ID || repair.Spec.Executor != "qoder-cn" || repair.Spec.Commit != bad ||
-		!strings.Contains(repair.Spec.Prompt, "FAIL save-code round trip") {
+	if repair.Spec.RepairOf != ci.ID || repair.Spec.Executor != "minimax-code" || repair.Spec.Commit != bad ||
+		!strings.Contains(repair.Spec.Prompt, "invalid resource") {
 		t.Fatalf("repair did not get the CI input and diagnostic: %+v", repair.Spec)
 	}
 	report(repair, "succeeded", fixed)
@@ -269,5 +275,88 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 	report(rebuild, "succeeded", fixed)
 	if qa := claim("qa"); qa.Spec.Commit != fixed {
 		t.Fatalf("QA did not get the verified commit: %+v", qa.Spec)
+	}
+}
+
+func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
+	ctx, db, _ := integrationStore(t)
+	enrollment, err := db.Enroll(ctx, "QA rework")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid := enrollment.Machine.ID
+	if err := db.Heartbeat(ctx, mid, protocol.Heartbeat{Executors: []string{"godot", "qoder-cn", "codex", "minimax-code"}, Projects: []string{"moon"}, ProductionWorkflow: true, WorkflowReview: true}); err != nil {
+		t.Fatal(err)
+	}
+	w, err := db.SaveWorkflow(ctx, protocol.Workflow{ID: "rework", Name: "Rework", Steps: []protocol.Step{
+		{ID: "audio", Executor: "qoder-cn"},
+		{ID: "develop", Executor: "codex", DependsOn: []string{"audio"}, BaseFrom: "audio", Preflight: true},
+		{ID: "ci", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true},
+		{ID: "qa", Executor: "minimax-code", DependsOn: []string{"ci"}, BaseFrom: "ci", QAGate: true, QARework: true},
+		{ID: "release", Executor: "notify", DependsOn: []string{"qa"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eid := strings.Repeat("1", 32)
+	if _, err := db.StartExecution(ctx, protocol.ExecutionInput{ID: eid, WorkflowID: w.ID, Version: w.Version, MachineID: mid, Project: "moon", Brief: "Make a game"}); err != nil {
+		t.Fatal(err)
+	}
+	tick := func() {
+		t.Helper()
+		if err := db.Schedule(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim := func(step, commit, executor string) *protocol.Run {
+		t.Helper()
+		tick()
+		job, err := db.Claim(ctx, mid)
+		if err != nil || job == nil || job.StepID != step || job.Spec.Commit != commit || job.Spec.Executor != executor {
+			t.Fatalf("wanted %s on %s by %s: %+v %v", step, commit, executor, job, err)
+		}
+		if err := db.Start(ctx, mid, job.ID, job.Lease); err != nil {
+			t.Fatal(err)
+		}
+		return job
+	}
+	report := func(job *protocol.Run, status, commit string, bugs ...protocol.Bug) {
+		t.Helper()
+		result := &protocol.Result{Status: status, Detail: "fixture", Commit: commit, Bugs: bugs}
+		if _, err := db.Report(ctx, mid, job.ID, protocol.Report{Lease: job.Lease, Result: result}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audio, build, fix, integrated := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40), strings.Repeat("d", 40)
+	report(claim("audio", "", "qoder-cn"), "succeeded", audio)
+	report(claim("develop", audio, "codex"), "succeeded", build)
+	report(claim("ci", build, "godot"), "succeeded", build)
+	qa := claim("qa", build, "minimax-code")
+	bug := protocol.Bug{Owner: "audio", Title: "Music missing", Steps: "Enter a level", Expected: "Music loops", Actual: "Silence"}
+	report(qa, "failed", build, bug)
+	asset := claim("qa:fix:audio", build, "qoder-cn")
+	if asset.Spec.RepairOf != qa.ID || !strings.Contains(asset.Spec.Prompt, bug.Title) {
+		t.Fatalf("missing ticket handoff: %+v", asset.Spec)
+	}
+	report(asset, "succeeded", fix)
+	develop := claim("qa:fix:develop", fix, "codex")
+	if !develop.Spec.Preflight {
+		t.Fatal("rework bypassed development check")
+	}
+	report(develop, "succeeded", integrated)
+	rebuild := claim("ci", integrated, "godot")
+	if rebuild.Spec.RecheckOf != qa.ID || !rebuild.Spec.ExportGame {
+		t.Fatalf("missing CI recheck: %+v", rebuild.Spec)
+	}
+	report(rebuild, "succeeded", integrated)
+	review := claim("qa", integrated, "minimax-code")
+	if e, err := db.Execution(ctx, eid); err != nil || e.Status != "running" || len(e.Approved) != 0 {
+		t.Fatalf("released before QA passed: %+v %v", e, err)
+	}
+	report(review, "succeeded", integrated)
+	tick()
+	tick()
+	if e, err := db.Execution(ctx, eid); err != nil || e.Status != "succeeded" || !slices.Contains(e.Approved, "release") {
+		t.Fatalf("release did not follow recheck: %+v %v", e, err)
 	}
 }

@@ -20,7 +20,7 @@ var schema string
 
 const leaseInterval = "interval '45 seconds'"
 const runColumns = "id, spec, status, lease, created, updated, result, execution_id, step_id, attempt"
-const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow"
+const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review"
 
 var ErrConflict = errors.New("run state or lease changed")
 
@@ -97,7 +97,7 @@ func (s *Store) AuthRunner(ctx context.Context, token string) (string, error) {
 
 func scanMachine(row pgx.Row) (protocol.Machine, error) {
 	var m protocol.Machine
-	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow)
+	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow, &m.WorkflowReview)
 	return m, err
 }
 
@@ -140,8 +140,8 @@ func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Hear
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,
-		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,seen=now() WHERE id=$1`,
-		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow); err != nil {
+		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,workflow_review=$10,seen=now() WHERE id=$1`,
+		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow, h.WorkflowReview); err != nil {
 		return reply, err
 	}
 	if h.CreateProjects {
@@ -257,6 +257,7 @@ func (s *Store) Claim(ctx context.Context, machine string) (*protocol.Run, error
 		AND coalesce(r.spec->>'engine','godot')=coalesce(m.project_engines->>(r.spec->>'project'),'godot')
 		AND (coalesce(r.spec->>'brief_mode','')='' OR m.brief_chat)
 		AND (NOT (r.spec ?| ARRAY['merge_commits','qa_gate','export_game']) OR m.production_workflow)
+		AND (NOT (r.spec ?| ARRAY['preflight','qa_rework','recheck_of']) OR m.workflow_review)
 		ORDER BY r.created,r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED) RETURNING `+runColumns, machine, lease)
 	run, err := scanRun(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {

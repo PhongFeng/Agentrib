@@ -12,6 +12,7 @@ type Machine struct {
 	CreateProjects     bool                   `json:"create_projects,omitempty"`
 	BriefChat          bool                   `json:"brief_chat,omitempty"`
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
+	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	Seen               time.Time              `json:"seen"`
 }
 
@@ -29,6 +30,7 @@ type Heartbeat struct {
 	CreateProjects     bool                   `json:"create_projects,omitempty"`
 	BriefChat          bool                   `json:"brief_chat,omitempty"`
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
+	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	ProjectResult      *ProjectResult         `json:"project_result,omitempty"`
 }
 
@@ -46,6 +48,9 @@ type Spec struct {
 	QAGate       bool     `json:"qa_gate,omitempty"`
 	ExportGame   bool     `json:"export_game,omitempty"`
 	RepairOf     string   `json:"repair_of,omitempty"`
+	Preflight    bool     `json:"preflight,omitempty"`
+	QARework     bool     `json:"qa_rework,omitempty"`
+	RecheckOf    string   `json:"recheck_of,omitempty"`
 }
 
 type Run struct {
@@ -79,6 +84,7 @@ type Result struct {
 	Commit    string     `json:"commit,omitempty"`
 	Artifacts []Artifact `json:"artifacts,omitempty"`
 	Reply     string     `json:"reply,omitempty"`
+	Bugs      []Bug      `json:"bugs,omitempty"`
 }
 
 type Report struct {
