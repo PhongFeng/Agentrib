@@ -8,6 +8,23 @@ CREATE TABLE IF NOT EXISTS machines (
 );
 
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS project_engines jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS project_workspaces jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS create_projects boolean NOT NULL DEFAULT false;
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_statuses jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS brief_chat boolean NOT NULL DEFAULT false;
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS production_workflow boolean NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS game_projects (
+    machine_id text NOT NULL REFERENCES machines(id),
+    id text NOT NULL,
+    name text NOT NULL,
+    engine text NOT NULL,
+    attempt text NOT NULL UNIQUE,
+    workspace_created boolean NOT NULL DEFAULT false,
+    error text NOT NULL DEFAULT '',
+    requested timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (machine_id, id)
+);
 
 CREATE TABLE IF NOT EXISTS runs (
     id text PRIMARY KEY,

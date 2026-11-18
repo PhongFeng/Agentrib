@@ -19,8 +19,8 @@ import (
 var schema string
 
 const leaseInterval = "interval '45 seconds'"
-const runColumns = "id, spec, status, lease, created, updated, result, execution_id, step_id"
-const machineColumns = "id,name,executors,projects,seen,project_engines"
+const runColumns = "id, spec, status, lease, created, updated, result, execution_id, step_id, attempt"
+const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow"
 
 var ErrConflict = errors.New("run state or lease changed")
 
@@ -97,7 +97,7 @@ func (s *Store) AuthRunner(ctx context.Context, token string) (string, error) {
 
 func scanMachine(row pgx.Row) (protocol.Machine, error) {
 	var m protocol.Machine
-	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines)
+	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow)
 	return m, err
 }
 
@@ -119,11 +119,38 @@ func (s *Store) Machines(ctx context.Context) ([]protocol.Machine, error) {
 }
 
 func (s *Store) Heartbeat(ctx context.Context, id string, h protocol.Heartbeat) error {
+	_, err := s.ProjectHeartbeat(ctx, id, h)
+	return err
+}
+
+func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Heartbeat) (protocol.HeartbeatReply, error) {
+	reply := protocol.HeartbeatReply{Status: "ok"}
 	if h.ProjectEngines == nil {
 		h.ProjectEngines = map[string]string{}
 	}
-	_, err := s.db.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,seen=now() WHERE id=$1`, id, h.Executors, h.Projects, h.ProjectEngines)
-	return err
+	if h.ProjectWorkspaces == nil {
+		h.ProjectWorkspaces = map[string]string{}
+	}
+	if h.AgentStatuses == nil {
+		h.AgentStatuses = map[string]protocol.AgentStatus{}
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return reply, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,
+		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,seen=now() WHERE id=$1`,
+		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow); err != nil {
+		return reply, err
+	}
+	if h.CreateProjects {
+		reply.Project, err = nextProjectRequest(ctx, tx, id, h)
+		if err != nil {
+			return reply, err
+		}
+	}
+	return reply, tx.Commit(ctx)
 }
 
 func (s *Store) expire(ctx context.Context) error {
@@ -137,7 +164,7 @@ func (s *Store) Sweep(ctx context.Context) error { return s.expire(ctx) }
 func scanRun(row pgx.Row, showLease bool) (protocol.Run, error) {
 	var run protocol.Run
 	var spec, result []byte
-	err := row.Scan(&run.ID, &spec, &run.Status, &run.Lease, &run.Created, &run.Updated, &result, &run.ExecutionID, &run.StepID)
+	err := row.Scan(&run.ID, &spec, &run.Status, &run.Lease, &run.Created, &run.Updated, &result, &run.ExecutionID, &run.StepID, &run.Attempt)
 	if err == nil {
 		err = json.Unmarshal(spec, &run.Spec)
 	}
@@ -152,11 +179,11 @@ func scanRun(row pgx.Row, showLease bool) (protocol.Run, error) {
 
 func insertRun(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, id string, spec protocol.Spec, executionID, stepID string) (protocol.Run, error) {
-	row := db.QueryRow(ctx, `INSERT INTO runs (id,machine_id,spec,status,execution_id,step_id)
-		VALUES ($1,$2,$3,'queued',$4,$5) ON CONFLICT(id) DO UPDATE SET id=excluded.id
-		WHERE runs.spec=excluded.spec AND runs.execution_id=excluded.execution_id AND runs.step_id=excluded.step_id
-		RETURNING `+runColumns, id, spec.MachineID, spec, executionID, stepID)
+}, id string, spec protocol.Spec, executionID, stepID string, attempt int) (protocol.Run, error) {
+	row := db.QueryRow(ctx, `INSERT INTO runs (id,machine_id,spec,status,execution_id,step_id,attempt)
+		VALUES ($1,$2,$3,'queued',$4,$5,$6) ON CONFLICT(id) DO UPDATE SET id=excluded.id
+		WHERE runs.spec=excluded.spec AND runs.execution_id=excluded.execution_id AND runs.step_id=excluded.step_id AND runs.attempt=excluded.attempt
+		RETURNING `+runColumns, id, spec.MachineID, spec, executionID, stepID, attempt)
 	run, err := scanRun(row, false)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return run, ErrConflict
@@ -165,14 +192,16 @@ func insertRun(ctx context.Context, db interface {
 }
 
 func (s *Store) CreateRun(ctx context.Context, id string, spec protocol.Spec) (protocol.Run, error) {
-	return insertRun(ctx, s.db, id, spec, "", "")
+	return insertRun(ctx, s.db, id, spec, "", "", 1)
 }
 
 func (s *Store) Runs(ctx context.Context, executionID string) ([]protocol.Run, error) {
 	if err := s.expire(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(ctx, `SELECT `+runColumns+` FROM runs WHERE $1='' OR execution_id=$1 ORDER BY created DESC,id LIMIT 200`, executionID)
+	rows, err := s.db.Query(ctx, `SELECT `+runColumns+` FROM runs
+		WHERE ($1='' OR execution_id=$1) AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=runs.execution_id AND e.archived)
+		ORDER BY created DESC,id LIMIT 200`, executionID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,8 +252,11 @@ func (s *Store) Claim(ctx context.Context, machine string) (*protocol.Run, error
 	row := s.db.QueryRow(ctx, `UPDATE runs SET status='claimed',lease=$2,lease_expires=now()+`+leaseInterval+`,updated=now()
 		WHERE id=(SELECT r.id FROM runs r JOIN machines m ON m.id=r.machine_id
 		WHERE r.machine_id=$1 AND r.status='queued' AND m.seen > now()-`+leaseInterval+`
+		AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=r.execution_id AND e.archived)
 		AND r.spec->>'executor'=ANY(m.executors) AND r.spec->>'project'=ANY(m.projects)
 		AND coalesce(r.spec->>'engine','godot')=coalesce(m.project_engines->>(r.spec->>'project'),'godot')
+		AND (coalesce(r.spec->>'brief_mode','')='' OR m.brief_chat)
+		AND (NOT (r.spec ?| ARRAY['merge_commits','qa_gate','export_game']) OR m.production_workflow)
 		ORDER BY r.created,r.id LIMIT 1 FOR UPDATE OF r SKIP LOCKED) RETURNING `+runColumns, machine, lease)
 	run, err := scanRun(row, true)
 	if errors.Is(err, pgx.ErrNoRows) {

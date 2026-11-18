@@ -3,14 +3,17 @@ package protocol
 import "time"
 
 type Step struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Role      string   `json:"role"`
-	Executor  string   `json:"executor"`
-	Prompt    string   `json:"prompt,omitempty"`
-	ReadOnly  bool     `json:"read_only,omitempty"`
-	DependsOn []string `json:"depends_on"`
-	BaseFrom  string   `json:"base_from,omitempty"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Role       string   `json:"role"`
+	Executor   string   `json:"executor"`
+	Prompt     string   `json:"prompt,omitempty"`
+	ReadOnly   bool     `json:"read_only,omitempty"`
+	DependsOn  []string `json:"depends_on"`
+	BaseFrom   string   `json:"base_from,omitempty"`
+	MergeFrom  []string `json:"merge_from,omitempty"`
+	QAGate     bool     `json:"qa_gate,omitempty"`
+	ExportGame bool     `json:"export_game,omitempty"`
 }
 
 type Workflow struct {

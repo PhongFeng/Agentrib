@@ -3,12 +3,16 @@ package protocol
 import "time"
 
 type Machine struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Executors      []string          `json:"executors"`
-	Projects       []string          `json:"projects"`
-	ProjectEngines map[string]string `json:"project_engines,omitempty"`
-	Seen           time.Time         `json:"seen"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Executors          []string               `json:"executors"`
+	AgentStatuses      map[string]AgentStatus `json:"agent_statuses,omitempty"`
+	Projects           []string               `json:"projects"`
+	ProjectEngines     map[string]string      `json:"project_engines,omitempty"`
+	CreateProjects     bool                   `json:"create_projects,omitempty"`
+	BriefChat          bool                   `json:"brief_chat,omitempty"`
+	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
+	Seen               time.Time              `json:"seen"`
 }
 
 type Enrollment struct {
@@ -17,20 +21,31 @@ type Enrollment struct {
 }
 
 type Heartbeat struct {
-	Executors      []string          `json:"executors"`
-	Projects       []string          `json:"projects"`
-	ProjectEngines map[string]string `json:"project_engines,omitempty"`
+	Executors          []string               `json:"executors"`
+	AgentStatuses      map[string]AgentStatus `json:"agent_statuses,omitempty"`
+	Projects           []string               `json:"projects"`
+	ProjectEngines     map[string]string      `json:"project_engines,omitempty"`
+	ProjectWorkspaces  map[string]string      `json:"project_workspaces,omitempty"`
+	CreateProjects     bool                   `json:"create_projects,omitempty"`
+	BriefChat          bool                   `json:"brief_chat,omitempty"`
+	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
+	ProjectResult      *ProjectResult         `json:"project_result,omitempty"`
 }
 
 type Spec struct {
-	MachineID string `json:"machine_id"`
-	Project   string `json:"project"`
-	Engine    string `json:"engine,omitempty"`
-	Executor  string `json:"executor"`
-	Title     string `json:"title"`
-	Prompt    string `json:"prompt"`
-	Commit    string `json:"commit,omitempty"`
-	ReadOnly  bool   `json:"read_only,omitempty"`
+	MachineID    string   `json:"machine_id"`
+	Project      string   `json:"project"`
+	Engine       string   `json:"engine,omitempty"`
+	Executor     string   `json:"executor"`
+	Title        string   `json:"title"`
+	Prompt       string   `json:"prompt"`
+	Commit       string   `json:"commit,omitempty"`
+	ReadOnly     bool     `json:"read_only,omitempty"`
+	BriefMode    string   `json:"brief_mode,omitempty"`
+	MergeCommits []string `json:"merge_commits,omitempty"`
+	QAGate       bool     `json:"qa_gate,omitempty"`
+	ExportGame   bool     `json:"export_game,omitempty"`
+	RepairOf     string   `json:"repair_of,omitempty"`
 }
 
 type Run struct {
@@ -43,6 +58,7 @@ type Run struct {
 	Result      *Result   `json:"result,omitempty"`
 	ExecutionID string    `json:"execution_id,omitempty"`
 	StepID      string    `json:"step_id,omitempty"`
+	Attempt     int       `json:"attempt,omitempty"`
 }
 
 type Event struct {
@@ -62,6 +78,7 @@ type Result struct {
 	Detail    string     `json:"detail"`
 	Commit    string     `json:"commit,omitempty"`
 	Artifacts []Artifact `json:"artifacts,omitempty"`
+	Reply     string     `json:"reply,omitempty"`
 }
 
 type Report struct {

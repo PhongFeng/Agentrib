@@ -37,8 +37,12 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/machines", a.asOperator(a.machines))
 	mux.HandleFunc("POST /api/v1/machines", a.asOperator(a.enroll))
+	mux.HandleFunc("GET /api/v1/machines/{id}/projects", a.asOperator(a.projects))
+	mux.HandleFunc("POST /api/v1/machines/{id}/projects", a.asOperator(a.createProject))
+	mux.HandleFunc("GET /api/v1/machines/{id}/projects/{project}/commits", a.asOperator(a.projectCommits))
 	mux.HandleFunc("GET /api/v1/runs", a.asOperator(a.runs))
 	mux.HandleFunc("POST /api/v1/runs", a.asOperator(a.createRun))
+	mux.HandleFunc("POST /api/v1/brief-turns", a.asOperator(a.createBriefTurn))
 	mux.HandleFunc("GET /api/v1/runs/{id}", a.asOperator(a.run))
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
 	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.download))
@@ -54,6 +58,7 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("GET /api/v1/executions", a.asOperator(a.executions))
 	mux.HandleFunc("POST /api/v1/executions", a.asOperator(a.startExecution))
 	mux.HandleFunc("GET /api/v1/executions/{id}", a.asOperator(a.execution))
+	mux.HandleFunc("POST /api/v1/executions/{id}/continue", a.asOperator(a.continueExecution))
 	mux.HandleFunc("POST /api/v1/executions/{id}/approve/{step}", a.asOperator(a.approve))
 	mux.HandleFunc("POST /api/v1/runner/heartbeat", a.asRunner(a.heartbeat))
 	mux.HandleFunc("POST /api/v1/runner/claim", a.asRunner(a.claim))
@@ -82,7 +87,10 @@ func response(w http.ResponseWriter, status int, value any, err error) {
 		send(w, status, value)
 	case errors.Is(err, store.ErrConflict):
 		problem(w, http.StatusConflict, "Run state or lease changed")
-	case errors.Is(err, store.ErrEngineUnavailable), errors.Is(err, store.ErrProjectEngine), errors.Is(err, store.ErrAgentUnavailable):
+	case errors.Is(err, store.ErrEngineUnavailable), errors.Is(err, store.ErrProjectEngine), errors.Is(err, store.ErrAgentUnavailable),
+		errors.Is(err, store.ErrBriefUnavailable), errors.Is(err, store.ErrProductionUnavailable):
+		problem(w, http.StatusConflict, err.Error())
+	case errors.Is(err, store.ErrProjectExists), errors.Is(err, store.ErrProjectLimit), errors.Is(err, store.ErrProjectCreation):
 		problem(w, http.StatusConflict, err.Error())
 	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pgErr) && pgErr.Code == "23503":
 		problem(w, http.StatusNotFound, "Record not found")
@@ -188,6 +196,7 @@ func validSpec(spec protocol.Spec) bool {
 	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
 	agent, usesAgent := protocol.FindAgent(spec.Executor)
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
+		spec.BriefMode == "" && spec.RepairOf == "" && len(spec.MergeCommits) == 0 && !spec.QAGate && !spec.ExportGame &&
 		known && engine.Implemented && (usesAgent || spec.Executor == engine.ID) &&
 		(!spec.ReadOnly || agent.ReadOnly) &&
 		validText(spec.Title, 200) && len(spec.Prompt) <= 16000 && !strings.ContainsRune(spec.Prompt, 0) &&
@@ -239,7 +248,8 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 	if !read(w, r, &h) {
 		return
 	}
-	if len(h.Executors) > len(protocol.Agents)+len(protocol.Engines) || len(h.Projects) > 64 || len(h.ProjectEngines) > len(h.Projects) {
+	if len(h.Executors) > len(protocol.Agents)+len(protocol.Engines) || len(h.Projects) > protocol.MaxProjects ||
+		len(h.ProjectEngines) > len(h.Projects) || len(h.ProjectWorkspaces) > len(h.Projects) {
 		problem(w, http.StatusBadRequest, "Heartbeat too large")
 		return
 	}
@@ -248,6 +258,10 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 			problem(w, http.StatusBadRequest, "Unknown executor")
 			return
 		}
+	}
+	if !validAgentStatuses(h.AgentStatuses) {
+		problem(w, http.StatusBadRequest, "Invalid Agent statuses")
+		return
 	}
 	projects := make(map[string]bool, len(h.Projects))
 	for _, key := range h.Projects {
@@ -263,13 +277,25 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 			return
 		}
 	}
+	for key, workspace := range h.ProjectWorkspaces {
+		if !projects[key] || !validText(workspace, 4096) {
+			problem(w, http.StatusBadRequest, "Invalid project workspace")
+			return
+		}
+	}
+	if result := h.ProjectResult; result != nil && (!h.CreateProjects || !idPattern.MatchString(result.Attempt) ||
+		result.Error != "" && !validText(result.Error, 1800)) {
+		problem(w, http.StatusBadRequest, "Invalid project result")
+		return
+	}
 	if h.Executors == nil {
 		h.Executors = []string{}
 	}
 	if h.Projects == nil {
 		h.Projects = []string{}
 	}
-	response(w, http.StatusOK, map[string]string{"status": "ok"}, a.store.Heartbeat(r.Context(), id, h))
+	reply, err := a.store.ProjectHeartbeat(r.Context(), id, h)
+	response(w, http.StatusOK, reply, err)
 }
 
 func (a *API) claim(w http.ResponseWriter, r *http.Request, id string) {
@@ -325,6 +351,9 @@ func validResult(result *protocol.Result) bool {
 		return false
 	}
 	if !validText(result.Detail, 3000) || result.Commit != "" && !commitPattern.MatchString(result.Commit) || len(result.Artifacts) > 12 {
+		return false
+	}
+	if result.Reply != "" && (result.Status != "succeeded" || !validText(result.Reply, protocol.MaxBriefBytes)) {
 		return false
 	}
 	for _, artifact := range result.Artifacts {

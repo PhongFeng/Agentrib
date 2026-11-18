@@ -23,12 +23,14 @@ type Project struct {
 }
 
 type Config struct {
-	Server    string             `json:"server"`
-	State     string             `json:"state"`
-	TokenFile string             `json:"token_file"`
-	Commands  map[string]string  `json:"commands"`
-	Projects  map[string]Project `json:"projects"`
-	token     string
+	Server     string             `json:"server"`
+	HTTPSProxy string             `json:"https_proxy,omitempty"`
+	State      string             `json:"state"`
+	TokenFile  string             `json:"token_file"`
+	Commands   map[string]string  `json:"commands"`
+	Projects   map[string]Project `json:"projects"`
+	token      string
+	proxy      *url.URL
 }
 
 var projectKey = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
@@ -52,8 +54,16 @@ func Load(path string) (Config, error) {
 		return c, errors.New("server must be an HTTPS origin (HTTP is supported on loopback for development)")
 	}
 	c.Server = strings.TrimRight(c.Server, "/")
-	if !filepath.IsAbs(c.State) || len(c.Projects) == 0 || len(c.Projects) > 64 {
-		return c, errors.New("provide an absolute state directory and 1–64 projects")
+	if c.HTTPSProxy != "" {
+		proxy, err := url.Parse(c.HTTPSProxy)
+		if err != nil || proxy.Hostname() == "" || (proxy.Scheme != "http" && proxy.Scheme != "https") ||
+			(proxy.Path != "" && proxy.Path != "/") || proxy.RawQuery != "" || proxy.Fragment != "" {
+			return c, errors.New("https_proxy must be an HTTP or HTTPS proxy URL")
+		}
+		c.proxy = proxy
+	}
+	if !filepath.IsAbs(c.State) || len(c.Projects) > protocol.MaxProjects {
+		return c, errors.New("provide an absolute state directory and at most 64 existing projects")
 	}
 	for key, project := range c.Projects {
 		project.Engine = protocol.EngineID(project.Engine)

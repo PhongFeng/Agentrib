@@ -7,18 +7,22 @@ import (
 	"strings"
 
 	"github.com/PhongFeng/Agentrib/internal/protocol"
+	"github.com/PhongFeng/Agentrib/internal/store"
 )
 
 var gameTemplate = protocol.Workflow{ID: "game-delivery", Name: "游戏制作与交付", Engine: protocol.DefaultEngine, Steps: []protocol.Step{
-	{ID: "brief", Name: "确认游戏简报", Role: "策划 / 制作人", Executor: "approval", DependsOn: []string{}},
-	{ID: "ui", Name: "生成游戏界面", Role: "界面设计", DependsOn: []string{"brief"},
-		Prompt: "Implement the agreed UI in reusable components, scenes, themes and assets for the selected engine. Include UI states and responsive layouts as required by the brief. Record file paths and integration notes for the development step. Keep gameplay rules and level data separate."},
-	{ID: "build", Name: "集成界面与开发玩法", Role: "玩法程序", DependsOn: []string{"ui"}, BaseFrom: "ui",
-		Prompt: "Start from the UI commit and read its integration notes. Wire the UI to the agreed gameplay, keep level data separate, and document how to test the result with the selected engine."},
-	{ID: "tests", Name: "运行引擎测试并导出", Role: "构建与测试", Executor: "engine", DependsOn: []string{"build"}, BaseFrom: "build"},
-	{ID: "qa", Name: "独立验收", Role: "QA 负责人", DependsOn: []string{"tests"}, BaseFrom: "tests", ReadOnly: true,
-		Prompt: "Compare the UI integration, gameplay in the exact checked-out commit and engine test evidence to the brief. Report pass, fail, or unverified for each criterion, with reproduction steps and a release recommendation. Review source and supplied test evidence with read-only tools."},
-	{ID: "release", Name: "确认交付版本", Role: "制作人 / 操作者", Executor: "approval", DependsOn: []string{"qa"}},
+	{ID: "producer", Name: "完善需求并拆分任务", Role: "制作人 / 产品 Agent", DependsOn: []string{},
+		Prompt: "以已确认的游戏简报和现有项目为依据，写入 docs/production/requirements.md，明确玩法、范围、约束和可验证的验收标准。同目录下分别写 art.md、audio.md、development.md，给各 Agent 说明任务、资源清单、格式、路径、接口和验收标准。约定美术与音效资源各自使用的目录，明确双方的集成接口。提交需求文档，并用简报中的明确决策约束方案。"},
+	{ID: "art", Name: "制作美术资源", Role: "美术 Agent", DependsOn: []string{"producer"}, BaseFrom: "producer",
+		Prompt: "阅读 docs/production/requirements.md 和 docs/production/art.md。制作任务要求的可用美术资源，按约定路径提交，并在 docs/production/art-handoff.md 记录文件、用途和接入说明。只修改本角色负责的资源和交接文档。"},
+	{ID: "audio", Name: "制作音效资源", Role: "音效 Agent", DependsOn: []string{"producer"}, BaseFrom: "producer",
+		Prompt: "阅读 docs/production/requirements.md 和 docs/production/audio.md。制作任务要求的可用音效和音乐，按约定路径提交，并在 docs/production/audio-handoff.md 记录文件、触发时机和接入说明。只修改本角色负责的资源和交接文档。"},
+	{ID: "develop", Name: "开发玩法并接入资源", Role: "开发 Agent", DependsOn: []string{"art", "audio"}, BaseFrom: "art", MergeFrom: []string{"audio"},
+		Prompt: "阅读 docs/production/requirements.md、development.md 和美术、音效交接文档。确认必要资源齐全，在合并后的版本接入真实资源并实现可玩的游戏。按验收标准补齐可运行的测试。Godot 项目需提交可用的 Web 导出预设，默认名为 Web，保留已有有效预设，并配置可运行的主场景。"},
+	{ID: "ci", Name: "CI 构建与测试", Role: "构建与测试", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true},
+	{ID: "qa", Name: "验收游戏", Role: "QA Agent", DependsOn: []string{"ci"}, BaseFrom: "ci", ReadOnly: true, QAGate: true,
+		Prompt: "依据需求文档和已确认的简报，对集成后的游戏逐条验收。核对玩法、美术与音效接入、引擎测试证据以及导出结果。记录每条标准的结论、证据、复现步骤及发现的问题。仅在全部必要标准通过时判定可交付，缺少证据的必要标准标为未验证。"},
+	{ID: "release", Name: "通知交付", Role: "制作工作台", Executor: "notify", DependsOn: []string{"qa"}},
 }}
 
 func (a *API) template(w http.ResponseWriter, _ *http.Request) {
@@ -57,7 +61,7 @@ func validateWorkflow(workflow protocol.Workflow) error {
 			return errors.New("Each step needs a unique ID, name, and role")
 		}
 		agent, usesAgent := protocol.FindAgent(step.Executor)
-		if step.Executor != "approval" && step.Executor != "engine" && !usesAgent && step.Executor != engine.ID {
+		if step.Executor != "approval" && step.Executor != "notify" && step.Executor != "engine" && !usesAgent && step.Executor != engine.ID {
 			return fmt.Errorf("Unknown executor for %s", step.ID)
 		}
 		if len(step.Prompt) > 3000 || strings.ContainsRune(step.Prompt, 0) ||
@@ -66,6 +70,9 @@ func validateWorkflow(workflow protocol.Workflow) error {
 		}
 		if step.ReadOnly && !agent.ReadOnly {
 			return fmt.Errorf("Selected executor does not support read-only step %s", step.ID)
+		}
+		if step.QAGate && !step.ReadOnly || step.ExportGame && step.Executor != "engine" && step.Executor != engine.ID {
+			return fmt.Errorf("Invalid QA or export setting for %s", step.ID)
 		}
 		steps[step.ID] = step
 	}
@@ -77,8 +84,20 @@ func validateWorkflow(workflow protocol.Workflow) error {
 			}
 			deps[id] = true
 		}
-		if step.BaseFrom != "" && (!deps[step.BaseFrom] || steps[step.BaseFrom].Executor == "approval") {
-			return fmt.Errorf("Commit source for %s must be a direct executable dependency", step.ID)
+		if len(step.MergeFrom) > 0 && step.BaseFrom == "" {
+			return fmt.Errorf("Choose a primary commit source before merging inputs for %s", step.ID)
+		}
+		sources := map[string]bool{}
+		for _, source := range append([]string{step.BaseFrom}, step.MergeFrom...) {
+			if source == "" && step.BaseFrom == "" {
+				continue
+			}
+			upstream := steps[source].Executor
+			if !deps[source] || upstream == "approval" || upstream == "notify" || sources[source] ||
+				step.Executor == "approval" || step.Executor == "notify" {
+				return fmt.Errorf("Commit source for %s must be a unique direct executable dependency", step.ID)
+			}
+			sources[source] = true
 		}
 	}
 	resolved := make(map[string]bool)
@@ -101,7 +120,12 @@ func validateWorkflow(workflow protocol.Workflow) error {
 }
 
 func (a *API) executions(w http.ResponseWriter, r *http.Request) {
-	list, err := a.store.Executions(r.Context())
+	project := r.URL.Query().Get("project")
+	if project != "" && !slugPattern.MatchString(project) {
+		problem(w, http.StatusBadRequest, "Invalid project")
+		return
+	}
+	list, err := a.store.Executions(r.Context(), project)
 	response(w, http.StatusOK, list, err)
 }
 
@@ -111,7 +135,7 @@ func (a *API) startExecution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !idPattern.MatchString(input.ID) || !slugPattern.MatchString(input.WorkflowID) || input.Version < 1 ||
-		!idPattern.MatchString(input.MachineID) || !slugPattern.MatchString(input.Project) || !validText(input.Brief, 8000) ||
+		!idPattern.MatchString(input.MachineID) || !slugPattern.MatchString(input.Project) || !validText(input.Brief, protocol.MaxBriefBytes) ||
 		input.Commit != "" && !commitPattern.MatchString(input.Commit) {
 		problem(w, http.StatusBadRequest, "Invalid execution input")
 		return
@@ -122,6 +146,15 @@ func (a *API) startExecution(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) execution(w http.ResponseWriter, r *http.Request) {
 	execution, err := a.store.Execution(r.Context(), r.PathValue("id"))
+	response(w, http.StatusOK, execution, err)
+}
+
+func (a *API) continueExecution(w http.ResponseWriter, r *http.Request) {
+	execution, err := a.store.ContinueExecution(r.Context(), r.PathValue("id"))
+	if errors.Is(err, store.ErrConflict) {
+		problem(w, http.StatusConflict, "此运行没有可重试的步骤，请刷新后查看最新状态。")
+		return
+	}
 	response(w, http.StatusOK, execution, err)
 }
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,11 +34,44 @@ func git(ctx context.Context, path string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func executionBase(ctx context.Context, repository, execution string) (string, error) {
+	if !runID.MatchString(execution) {
+		return "", errors.New("invalid workflow execution ID")
+	}
+	ref := "refs/agentrib/executions/" + execution + "/base"
+	base, err := git(ctx, repository, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err == nil {
+		return base, nil
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		return "", err
+	}
+	base, err = git(ctx, repository, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if !objectID(base) {
+		return "", errors.New("Git project must use SHA-1 object IDs")
+	}
+	// Create the ref only if absent so concurrent steps agree on one starting commit.
+	if _, err := git(ctx, repository, "update-ref", ref, base, strings.Repeat("0", 40)); err != nil {
+		if existing, lookupErr := git(ctx, repository, "rev-parse", "--verify", ref+"^{commit}"); lookupErr == nil {
+			return existing, nil
+		}
+		return "", err
+	}
+	return base, nil
+}
+
 func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protocol.Result, error) {
 	var result protocol.Result
 	project, exists := r.cfg.Projects[run.Spec.Project]
 	if !exists {
-		return result, errors.New("project is missing from the local runner configuration")
+		project, exists = r.managedProject(run.Spec.Project)
+	}
+	if !exists {
+		return result, errors.New("project Git workspace is unavailable on this Runner")
 	}
 	engineID := protocol.EngineID(run.Spec.Engine)
 	engine, known := protocol.FindEngine(engineID)
@@ -46,18 +80,30 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		return result, errors.New("selected engine does not match this Runner project")
 	}
 	engineBuild := run.Spec.Executor == engineID
+	brief := run.Spec.BriefMode != ""
+	if (brief || run.Spec.QAGate) && (!run.Spec.ReadOnly || engineBuild) {
+		return result, errors.New("brief and QA require a read-only Agent")
+	}
 	checkout := filepath.Join(r.cfg.State, "worktrees", run.ID)
 	if err := os.MkdirAll(filepath.Dir(checkout), 0700); err != nil {
 		return result, err
 	}
 	base := run.Spec.Commit
-	if base == "" {
-		if run.Spec.ReadOnly || engineBuild {
-			return result, errors.New("verification requires the development commit")
+	switch {
+	case base != "":
+		if !objectID(base) {
+			return result, errors.New("invalid Git commit")
 		}
+	case run.ExecutionID != "":
+		var err error
+		base, err = executionBase(ctx, project.Repository, run.ExecutionID)
+		if err != nil {
+			return result, fmt.Errorf("record workflow starting commit: %w", err)
+		}
+	case !brief && (run.Spec.ReadOnly || engineBuild):
+		return result, errors.New("verification requires the development commit")
+	default:
 		base = "HEAD"
-	} else if !objectID(base) {
-		return result, errors.New("invalid Git commit")
 	}
 	base, err := git(ctx, project.Repository, "rev-parse", "--verify", base+"^{commit}")
 	if err != nil {
@@ -76,6 +122,15 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 			emit("diagnostic", "Temporary worktree cleanup failed")
 		}
 	}()
+	if len(run.Spec.MergeCommits) > 0 {
+		base, err = mergeWorkflowInputs(ctx, checkout, run.Spec.MergeCommits, emit)
+		if err != nil {
+			return result, err
+		}
+		if _, err := git(ctx, project.Repository, "update-ref", "refs/agentrib/runs/"+run.ID, base); err != nil {
+			return result, err
+		}
+	}
 	dir, err := contained(checkout, filepath.Join(checkout, project.EngineDir))
 	if err != nil {
 		return result, err
@@ -86,6 +141,9 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	emit("status", "Checked out "+base)
 	result.Commit = base
 	if engineBuild {
+		if run.Spec.ExportGame && project.WebPreset == "" {
+			project.WebPreset = "Web"
+		}
 		result.Artifacts, err = adapter.Build(ctx, dir, filepath.Join(r.cfg.State, "artifacts", run.ID), project, emit)
 		return result, err
 	}
@@ -93,12 +151,29 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	if backend == nil {
 		return result, errors.New("Agent CLI is unavailable on this machine")
 	}
-	mode := "Keep all edits in this worktree. The Runner records the final changes as a local Git commit."
-	if run.Spec.ReadOnly {
-		mode = "Review the checked-out version. Do not change source files. Report findings and the evidence you used."
+	if qoder, ok := backend.(QoderCN); ok {
+		if godot, ok := adapter.(godotEngine); ok {
+			qoder.godot = godot.command
+			backend = qoder
+		}
 	}
-	prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
-	if err := backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit); err != nil {
+	var finalReply string
+	if brief {
+		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, emit)
+	} else {
+		mode := "Keep all edits in this worktree. The Runner records the final changes as a local Git commit."
+		if run.Spec.ReadOnly {
+			mode = "Review the checked-out version. Do not change source files. Report findings and the evidence you used."
+		}
+		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
+		if run.Spec.QAGate {
+			prompt += "\n\n验收报告的首行必须单独写 QA: PASS 或 QA: FAIL。全部必要标准均有证据且通过时使用 QA: PASS。否则使用 QA: FAIL。正文写明每项结论与证据。"
+			finalReply, err = r.finalAgentReply(ctx, backend, dir, prompt, emit)
+		} else {
+			err = backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit)
+		}
+	}
+	if err != nil {
 		return result, err
 	}
 	changes, err := git(ctx, checkout, "status", "--porcelain")
@@ -112,6 +187,17 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		}
 		if changes != "" || head != base {
 			return result, errors.New("read-only step wrote to the checkout")
+		}
+		if brief {
+			result.Commit = ""
+			result.Reply = finalReply
+		}
+		if run.Spec.QAGate {
+			emit("qa", finalReply)
+			verdict, _, _ := strings.Cut(finalReply, "\n")
+			if strings.TrimSpace(verdict) != "QA: PASS" {
+				return result, errors.New("QA 验收未通过，请查看报告")
+			}
 		}
 		return result, nil
 	}
@@ -133,6 +219,23 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	}
 	result.Commit = commit
 	return result, nil
+}
+
+func mergeWorkflowInputs(ctx context.Context, checkout string, commits []string, emit Emit) (string, error) {
+	for _, commit := range commits {
+		if !objectID(commit) {
+			return "", errors.New("invalid workflow input commit")
+		}
+		if _, err := git(ctx, checkout, "rev-parse", "--verify", commit+"^{commit}"); err != nil {
+			return "", err
+		}
+		emit("status", "Merging upstream commit "+commit)
+		if _, err := git(ctx, checkout, "-c", "user.name=Agentrib", "-c", "user.email=agentrib@localhost",
+			"-c", "commit.gpgsign=false", "merge", "--no-edit", commit); err != nil {
+			return "", fmt.Errorf("merge workflow input %s: %w", commit, err)
+		}
+	}
+	return git(ctx, checkout, "rev-parse", "HEAD")
 }
 
 func (g godotEngine) Build(ctx context.Context, dir, out string, project Project, emit Emit) ([]protocol.Artifact, error) {
