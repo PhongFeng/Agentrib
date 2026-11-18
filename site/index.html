@@ -28,7 +28,7 @@
       border-radius: 12px;
       background: var(--panel);
     }
-    .engine-icon { width: 48px; height: 48px; object-fit: contain; }
+    .engine-icon { width: 44px; height: 44px; object-fit: contain; }
     .engine-list h3 { margin-top: 12px; font-size: 17px; }
     .engine-status { color: var(--muted); font-size: 13px; }
     .engine-status.ready { color: var(--mint); }
@@ -181,7 +181,7 @@
         <div>
           <p class="eyebrow">人类 × AI 智能体 · 一体化游戏工作室</p>
           <h1 id="intro-title">让人类与 AI 智能体<span>组成一个游戏工作室</span></h1>
-          <p class="lead">Agentrib 是一套模拟真实工作室层级结构的协调系统：人类担任制作人与审批者，Agent 按部门编组、按汇报线协作，覆盖研发、运营与发行三条工作流。当前聚焦产研——策划、美术、程序、音频与 QA 接续上游提交协作产出，引擎自动测试并导出试玩包，经只读 QA 验收后交付；运营与发行工作流正在设计中。</p>
+          <p class="lead">Agentrib 是一套模拟真实工作室层级结构的协调系统：人类担任制作人与审批者，Agent 按部门编组、按汇报线协作，覆盖研发、运营与发行三条工作流。当前聚焦产研——策划、美术、程序、音频与 QA 接续上游提交协作产出，引擎自动测试并导出试玩包，经 QA 验收后交付；运营与发行工作流正在设计中。</p>
           <div class="actions">
             <a class="button primary" href="/console/">打开控制台 →</a>
             <a class="button secondary" href="#studio">了解工作室结构</a>
@@ -262,10 +262,10 @@
           </div>
           <div class="arch-arrow" aria-hidden="true">⇄</div>
           <div class="arch-node">
-            <p class="role">执行机器 · Mac</p>
+            <p class="role">执行机器</p>
             <h3>Runner</h3>
             <p>领取任务，在独立 Git worktree 中调用 Agent CLI 与游戏引擎，回传提交、日志与构建产物。本地未提交的改动始终保留。</p>
-            <div class="arch-tags"><span class="arch-tag">16 种 Agent CLI</span><span class="arch-tag">Godot 无界面测试</span><span class="arch-tag">Web 试玩包导出</span></div>
+            <div class="arch-tags"><span class="arch-tag">16 种 Agent CLI</span><span class="arch-tag">Web 试玩包导出</span></div>
           </div>
         </div>
         <ol class="pipeline reveal" aria-label="一次制作的提交流转">
@@ -273,7 +273,7 @@
           <li class="pipe-step"><span class="num">02</span><h4>美术</h4><p>场景与资源</p><span class="pipe-commit">接续 a1b2c3d</span></li>
           <li class="pipe-step"><span class="num">03</span><h4>开发</h4><p>接入资源与逻辑</p><span class="pipe-commit">接续 e4f5a6b</span></li>
           <li class="pipe-step"><span class="num">04</span><h4>CI 测试</h4><p>引擎测试 + 导出</p><span class="pipe-commit">接续 c7d8e9f</span></li>
-          <li class="pipe-step"><span class="num">05</span><h4>QA 验收</h4><p>只读核对产出</p><span class="pipe-commit">同一提交</span></li>
+          <li class="pipe-step"><span class="num">05</span><h4>QA 验收</h4><p>核对提交与产物</p><span class="pipe-commit">同一提交</span></li>
           <li class="pipe-step"><span class="num">06</span><h4>交付</h4><p>审批后发布</p><span class="pipe-commit">试玩包下载</span></li>
         </ol>
         <p class="pipeline-note reveal">提交保存在项目本机的 <code>refs/agentrib/runs/</code> 下；QA 与构建核对同一提交，确保验收的就是将要交付的版本。</p>
@@ -299,12 +299,12 @@
           <li class="feature reveal">
             <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2.5"/><path d="M10 9l5 3-5 3zM8 21h8"/></svg></span>
             <h3>引擎测试与试玩包</h3>
-            <p>Godot 项目执行无界面测试，并用 Web 预设导出试玩包。产物经 SHA-256 校验后可在运行详情下载。</p>
+            <p>项目执行引擎无界面测试，并导出 Web 试玩包。产物经 SHA-256 校验后可在运行详情下载。</p>
           </li>
           <li class="feature reveal">
             <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-3 7.6-7 9-4-1.4-7-4.4-7-9V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg></span>
-            <h3>只读 QA 门禁</h3>
-            <p>QA 步骤以只读工具验收，核对提交、测试记录与产物，给出 PASS 结论后才放行交付。</p>
+            <h3>QA 门禁</h3>
+            <p>QA 步骤核对提交、测试记录与产物，给出 PASS 结论后才放行交付。</p>
           </li>
           <li class="feature reveal">
             <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.5-3.5M4 5v3.5H7.5M4 13a8 8 0 0 0 14.5 3.5M20 19v-3.5H16.5"/></svg></span>
@@ -374,25 +374,25 @@
         <p class="lead">在工作流编辑器中选择引擎。计划接入的引擎可以先保存到工作流，适配器上线后即可派单。</p>
         <ul class="engine-list">
           <li>
-            <img class="engine-icon" src="./engines/godot.svg" alt="" width="48" height="48">
+            <img class="engine-icon" src="./engines/godot.svg" alt="" width="44" height="44">
             <h3>Godot 4</h3>
             <p class="engine-status ready">已接入</p>
             <p class="engine-description"><code>project.godot</code> 项目可执行无界面测试，并使用 Web 预设导出试玩包。</p>
           </li>
           <li>
-            <img class="engine-icon" src="./engines/unreal-white.png" alt="" width="48" height="48">
+            <img class="engine-icon" src="./engines/unreal-logo.png" alt="" width="44" height="44">
             <h3>Unreal Engine</h3>
             <p class="engine-status">计划接入</p>
             <p class="engine-description"><code>.uproject</code> 项目，面向 C++ 与蓝图开发流程。</p>
           </li>
           <li>
-            <img class="engine-icon" src="./engines/unity-white.svg" alt="" width="48" height="48">
+            <img class="engine-icon" src="./engines/unity-white.svg" alt="" width="44" height="44">
             <h3>Unity</h3>
             <p class="engine-status">计划接入</p>
             <p class="engine-description"><code>Assets/</code> 与 <code>Packages/</code> 项目结构，面向 C# 开发流程。</p>
           </li>
           <li>
-            <img class="engine-icon" src="./engines/cocos-creator.png" alt="" width="48" height="48">
+            <img class="engine-icon" src="./engines/cocos-logo.png" alt="" width="44" height="44">
             <h3>Cocos Creator</h3>
             <p class="engine-status">计划接入</p>
             <p class="engine-description"><code>assets/</code> 与 <code>package.json</code> 项目结构，面向 TypeScript 开发流程。</p>
@@ -436,8 +436,8 @@
             <article class="project-card">
               <img class="project-art" src="./projects/moon-power-cover.webp" alt="月面基地的太阳能阵列，远处可见地球" width="1774" height="887" loading="lazy" decoding="async">
               <div class="project-content">
-                <h3>Lunar power</h3>
-                <p>10 关 2D 推箱解谜。把能量箱推到供电节点，逐步点亮月面基地。</p>
+                <h3>Moon power</h3>
+                <p>2D 推箱解谜。把能量箱推到供电节点，逐步点亮月面基地。</p>
               </div>
             </article>
           </li>
@@ -463,7 +463,7 @@
       if (!canvas || !canvas.getContext) return;
       var ctx = canvas.getContext('2d');
       var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
-      var stars = [], w = 0, h = 0, raf = 0;
+      var stars = [], meteors = [], nextMeteor = 0, w = 0, h = 0, raf = 0;
       function resize() {
         var dpr = Math.min(window.devicePixelRatio || 1, 2);
         w = window.innerWidth; h = window.innerHeight;
@@ -472,6 +472,7 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         var count = Math.min(200, Math.round(w * h / 9000));
         stars = [];
+        meteors = []; nextMeteor = 0;
         for (var i = 0; i < count; i++) {
           stars.push({
             x: Math.random() * w, y: Math.random() * h,
@@ -497,8 +498,28 @@
         }
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
+        for (var j = meteors.length - 1; j >= 0; j--) {
+          var m = meteors[j]; var p = (t - m.born) / m.dur;
+          if (p >= 1) { meteors.splice(j, 1); continue; }
+          var hx = m.x + m.vx * (t - m.born), hy = m.y + m.vy * (t - m.born);
+          var sp = Math.hypot(m.vx, m.vy);
+          var tx = hx - m.vx / sp * m.len, ty = hy - m.vy / sp * m.len;
+          var a = Math.sin(Math.PI * p) * 0.9;
+          var g = ctx.createLinearGradient(hx, hy, tx, ty);
+          g.addColorStop(0, 'rgba(223,233,255,' + a.toFixed(3) + ')');
+          g.addColorStop(1, 'rgba(223,233,255,0)');
+          ctx.strokeStyle = g; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx, ty); ctx.stroke();
+          ctx.globalAlpha = a; ctx.fillStyle = '#ffffff';
+          ctx.beginPath(); ctx.arc(hx, hy, 1.4, 0, 6.2832); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
       }
       function step(t) {
+        if (t > nextMeteor) {
+          nextMeteor = t + 2600 + Math.random() * 4200;
+          meteors.push({ x: w * (0.25 + Math.random() * 0.7), y: h * Math.random() * 0.35, vx: -(0.35 + Math.random() * 0.3), vy: 0.18 + Math.random() * 0.16, born: t, dur: 900 + Math.random() * 500, len: 70 + Math.random() * 60 });
+        }
         for (var i = 0; i < stars.length; i++) {
           var s = stars[i];
           s.x += s.vx; s.y += s.vy;
