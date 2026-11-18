@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,7 +24,10 @@ type Backend interface {
 }
 
 type Codex struct{ command string }
-type QoderCN struct{ command string }
+type QoderCN struct {
+	command string
+	godot   string
+}
 type MiniMaxCode struct{ command string }
 
 func (c Codex) Probe(ctx context.Context) error {
@@ -37,12 +42,17 @@ func (m MiniMaxCode) Probe(ctx context.Context) error {
 }
 
 func (c Codex) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) error {
+	return c.execute(ctx, directory, prompt, readOnly, emit)
+}
+
+func (c Codex) execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit, options ...string) error {
 	mode := "workspace-write"
 	if readOnly {
 		mode = "read-only"
 	}
-	cmd := command(ctx, directory, c.command, "exec", "--json", "--ephemeral", "--color", "never",
-		"-c", `approval_policy="never"`, "--sandbox", mode, "-")
+	args := []string{"exec", "--json", "--ephemeral", "--color", "never", "-c", `approval_policy="never"`, "--sandbox", mode}
+	args = append(args, options...)
+	cmd := command(ctx, directory, c.command, append(args, "-")...)
 	return stream(cmd, prompt, func(line string) { parseCodex(line, emit) }, emit)
 }
 
@@ -51,9 +61,23 @@ func (q QoderCN) Execute(ctx context.Context, directory, prompt string, readOnly
 	if readOnly {
 		args = append(args, "--tools=Read,Glob,Grep", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`)
 	} else {
-		args = append(args, "--permission-mode", "accept_edits")
+		allowed := []string{"Bash(python3 ./*.py)", "Bash(python3 ./*.py *)"}
+		prompt += "\n\nTo run Python scripts, use `python3 ./path/to/script.py`."
+		if q.godot != "" {
+			engine := filepath.Base(q.godot)
+			if strings.ContainsAny(engine, " \t") {
+				engine = strconv.Quote(engine)
+			}
+			allowed = append(allowed, "Bash("+engine+" --headless:*)")
+			prompt += "\nTo run Godot scripts, use `" + engine + " --headless --path . --script res://path/to/script.gd`."
+		}
+		args = append(args, "--permission-mode", "accept_edits", "--allowed-tools", strings.Join(allowed, ","))
 	}
 	cmd := command(ctx, directory, q.command, args...)
+	if !readOnly && q.godot != "" {
+		path := filepath.Dir(q.godot) + string(os.PathListSeparator) + os.Getenv("PATH")
+		cmd.Env = append(cmd.Env, "PATH="+path)
+	}
 	var resultErr error
 	err := stream(cmd, prompt, func(line string) {
 		if err := parseQoder(line, emit); err != nil {

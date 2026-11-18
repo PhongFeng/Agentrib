@@ -6,7 +6,62 @@ import (
 	"testing"
 
 	"github.com/PhongFeng/Agentrib/internal/protocol"
+	"github.com/jackc/pgx/v5"
 )
+
+func TestExecutionHistoryScopesProjectAndHidesArchives(t *testing.T) {
+	ctx, db, _ := integrationStore(t)
+	runner, err := db.Enroll(ctx, "History runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine := runner.Machine.ID
+	if err := db.Heartbeat(ctx, machine, protocol.Heartbeat{Executors: []string{"codex"}, Projects: []string{"moon", "smoke"}}); err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := db.SaveWorkflow(ctx, protocol.Workflow{ID: "history", Name: "History", Steps: []protocol.Step{{ID: "produce", Executor: "codex"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func(id, project string) {
+		t.Helper()
+		_, err := db.StartExecution(ctx, protocol.ExecutionInput{ID: id, Project: project, WorkflowID: workflow.ID, Version: workflow.Version, MachineID: machine, Brief: "Make a game"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	archived, moon, smoke := strings.Repeat("a", 32), strings.Repeat("b", 32), strings.Repeat("c", 32)
+	start(archived, "moon")
+	if err := db.Schedule(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.Exec(ctx, `UPDATE executions SET archived=true WHERE id=$1`, archived); err != nil {
+		t.Fatal(err)
+	}
+	start(moon, "moon")
+	start(smoke, "smoke")
+	for project, id := range map[string]string{"moon": moon, "smoke": smoke} {
+		list, err := db.Executions(ctx, project)
+		if err != nil || len(list) != 1 || list[0].ID != id {
+			t.Fatalf("history for %s: %+v %v", project, list, err)
+		}
+	}
+	if list, err := db.Executions(ctx, "other"); err != nil || len(list) != 0 {
+		t.Fatalf("history for unknown project: %+v %v", list, err)
+	}
+	if list, err := db.Executions(ctx, ""); err != nil || len(list) != 2 {
+		t.Fatalf("unfiltered history includes archive: %+v %v", list, err)
+	}
+	if _, err := db.Execution(ctx, archived); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("archive returned as active history: %v", err)
+	}
+	if _, err := db.ContinueExecution(ctx, archived); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("archive was allowed to resume: %v", err)
+	}
+	if run, err := db.Claim(ctx, machine); err != nil || run != nil {
+		t.Fatalf("archived run was claimable: %+v %v", run, err)
+	}
+}
 
 func TestWorkflowGatesAndCommitHandoff(t *testing.T) {
 	ctx, db, _ := integrationStore(t)

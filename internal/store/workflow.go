@@ -24,6 +24,7 @@ const workflowColumns = "id,version,name,steps,engine"
 var ErrEngineUnavailable = errors.New("Selected game engine has no available adapter on this Runner")
 var ErrProjectEngine = errors.New("Selected project does not match the workflow engine")
 var ErrAgentUnavailable = errors.New("Selected Agent is unavailable on this Runner")
+var ErrProductionUnavailable = errors.New("执行机器需要更新 Runner 才能运行此制作工作流")
 
 type queryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -40,10 +41,11 @@ func (s *Store) SaveWorkflow(ctx context.Context, workflow protocol.Workflow) (p
 		return workflow, err
 	}
 	var version int
-	if err := tx.QueryRow(ctx, `SELECT coalesce(max(version),0) FROM workflows WHERE id=$1`, workflow.ID).Scan(&version); err != nil {
+	var archived bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce(max(version),0), coalesce(bool_and(archived),false) FROM workflows WHERE id=$1`, workflow.ID).Scan(&version, &archived); err != nil {
 		return workflow, err
 	}
-	if version != workflow.Version {
+	if version != workflow.Version || archived {
 		return workflow, ErrConflict
 	}
 	workflow.Version = version + 1
@@ -65,7 +67,7 @@ func scanWorkflow(row pgx.Row) (protocol.Workflow, error) {
 }
 
 func (s *Store) Workflows(ctx context.Context) ([]protocol.Workflow, error) {
-	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (id) `+workflowColumns+` FROM workflows ORDER BY id,version DESC LIMIT 100`)
+	rows, err := s.db.Query(ctx, `SELECT DISTINCT ON (id) `+workflowColumns+` FROM workflows WHERE NOT archived ORDER BY id,version DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +90,7 @@ func scanExecution(row pgx.Row) (protocol.Execution, error) {
 }
 
 func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInput) (protocol.Execution, error) {
-	workflow, err := scanWorkflow(s.db.QueryRow(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE id=$1 AND version=$2`, input.WorkflowID, input.Version))
+	workflow, err := scanWorkflow(s.db.QueryRow(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE id=$1 AND version=$2 AND NOT archived`, input.WorkflowID, input.Version))
 	if err != nil {
 		return protocol.Execution{}, err
 	}
@@ -104,6 +106,9 @@ func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInpu
 		return protocol.Execution{}, ErrProjectEngine
 	}
 	for _, step := range workflow.Steps {
+		if !machine.ProductionWorkflow && (len(step.MergeFrom) > 0 || step.QAGate || step.ExportGame) {
+			return protocol.Execution{}, ErrProductionUnavailable
+		}
 		if agent, ok := protocol.FindAgent(step.Executor); ok && !slices.Contains(machine.Executors, agent.ID) {
 			return protocol.Execution{}, fmt.Errorf("%w: %s", ErrAgentUnavailable, agent.Name)
 		}
@@ -114,7 +119,7 @@ func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInpu
 	row := s.db.QueryRow(ctx, `INSERT INTO executions (id, workflow_id,version,machine_id,project,brief,commit_sha)
 		VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET id=excluded.id
 		WHERE executions.workflow_id=excluded.workflow_id AND executions.version=excluded.version AND executions.machine_id=excluded.machine_id
-		AND executions.project=excluded.project AND executions.brief=excluded.brief AND executions.commit_sha=excluded.commit_sha
+		AND executions.project=excluded.project AND executions.brief=excluded.brief AND executions.commit_sha=excluded.commit_sha AND NOT executions.archived
 		RETURNING `+executionColumns, input.ID, input.WorkflowID, input.Version, input.MachineID, input.Project, input.Brief, input.Commit)
 	e, err := scanExecution(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -123,8 +128,9 @@ func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInpu
 	return e, err
 }
 
-func (s *Store) Executions(ctx context.Context) ([]protocol.Execution, error) {
-	rows, err := s.db.Query(ctx, `SELECT `+executionColumns+` FROM executions ORDER BY created DESC LIMIT 100`)
+func (s *Store) Executions(ctx context.Context, project string) ([]protocol.Execution, error) {
+	rows, err := s.db.Query(ctx, `SELECT `+executionColumns+` FROM executions
+		WHERE NOT archived AND ($1='' OR project=$1) ORDER BY created DESC,id DESC LIMIT 100`, project)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +147,7 @@ func (s *Store) Executions(ctx context.Context) ([]protocol.Execution, error) {
 }
 
 func (s *Store) Execution(ctx context.Context, id string) (protocol.Execution, error) {
-	e, err := scanExecution(s.db.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1`, id))
+	e, err := scanExecution(s.db.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 AND NOT archived`, id))
 	if err != nil {
 		return e, err
 	}
@@ -193,10 +199,68 @@ func outcomes(e protocol.Execution) (map[string]bool, map[string]protocol.Run) {
 		done[approved] = true
 	}
 	for _, run := range e.Runs {
+		if runs[run.StepID].Attempt > run.Attempt {
+			continue
+		}
 		runs[run.StepID] = run
 		done[run.StepID] = run.Status == "succeeded"
 	}
 	return done, runs
+}
+
+func interrupted(status string) bool {
+	return status == "failed" || status == "lost" || status == "canceled"
+}
+
+// ContinueExecution opens new attempts on the same workflow and Git inputs.
+// Finished steps, approvals and previous attempts remain part of its history.
+func (s *Store) ContinueExecution(ctx context.Context, id string) (protocol.Execution, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return protocol.Execution{}, err
+	}
+	defer tx.Rollback(ctx)
+	e, err := scanExecution(tx.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 AND NOT archived FOR UPDATE`, id))
+	if err != nil {
+		return e, err
+	}
+	if e.Status != "failed" {
+		return e, ErrConflict
+	}
+	e, err = hydrate(ctx, tx, e)
+	if err != nil {
+		return e, err
+	}
+	_, latest := outcomes(e)
+	retried := false
+	for _, step := range e.Workflow.Steps {
+		prior := latest[step.ID]
+		if !interrupted(prior.Status) {
+			continue
+		}
+		handled, err := handleCIFailure(ctx, tx, e, step, latest, true)
+		if err != nil {
+			return e, err
+		}
+		if !handled {
+			if err := enqueueWorkflowAttempt(ctx, tx, e.ID, step.ID, prior.Attempt+1, prior.Spec); err != nil {
+				return e, err
+			}
+		}
+		retried = true
+	}
+	if !retried {
+		return e, ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `UPDATE executions SET status='running' WHERE id=$1`, e.ID); err != nil {
+		return e, err
+	}
+	e.Status = "running"
+	e, err = hydrate(ctx, tx, e)
+	if err != nil {
+		return e, err
+	}
+	return e, tx.Commit(ctx)
 }
 
 func ready(step protocol.Step, done map[string]bool) bool {
@@ -214,7 +278,7 @@ func (s *Store) Approve(ctx context.Context, id, stepID string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	e, err := scanExecution(tx.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 FOR UPDATE`, id))
+	e, err := scanExecution(tx.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 AND NOT archived FOR UPDATE`, id))
 	if err != nil {
 		return err
 	}
@@ -245,7 +309,7 @@ func (s *Store) Approve(ctx context.Context, id, stepID string) error {
 }
 
 func (s *Store) Schedule(ctx context.Context) error {
-	rows, err := s.db.Query(ctx, `SELECT id FROM executions WHERE status='running' ORDER BY created,id LIMIT 500`)
+	rows, err := s.db.Query(ctx, `SELECT id FROM executions WHERE status='running' AND NOT archived ORDER BY created,id LIMIT 500`)
 	if err != nil {
 		return err
 	}
@@ -276,7 +340,7 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	e, err := scanExecution(tx.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 AND status='running' FOR UPDATE SKIP LOCKED`, id))
+	e, err := scanExecution(tx.QueryRow(ctx, `SELECT `+executionColumns+` FROM executions WHERE id=$1 AND status='running' AND NOT archived FOR UPDATE SKIP LOCKED`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -292,9 +356,12 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 	complete := true
 	for _, step := range e.Workflow.Steps {
 		complete = complete && done[step.ID]
-		switch runs[step.ID].Status {
-		case "failed", "lost", "canceled":
-			failed = true
+		if interrupted(runs[step.ID].Status) {
+			handled, err := handleCIFailure(ctx, tx, e, step, runs, false)
+			if err != nil {
+				return err
+			}
+			failed = failed || !handled
 		}
 	}
 	if failed || complete {
@@ -308,24 +375,36 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		return tx.Commit(ctx)
 	}
 	for _, step := range e.Workflow.Steps {
-		if step.Executor == "approval" || runs[step.ID].ID != "" || !ready(step, done) {
+		if step.Executor == "approval" || done[step.ID] || runs[step.ID].ID != "" || !ready(step, done) {
+			continue
+		}
+		if step.Executor == "notify" {
+			if _, err := tx.Exec(ctx, `INSERT INTO step_approvals (execution_id,step_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, e.ID, step.ID); err != nil {
+				return err
+			}
 			continue
 		}
 		spec := protocol.Spec{MachineID: e.MachineID, Project: e.Project, Executor: step.Executor,
-			Engine: e.Workflow.Engine, Title: step.Name, ReadOnly: step.ReadOnly,
+			Engine: e.Workflow.Engine, Title: step.Name, ReadOnly: step.ReadOnly, QAGate: step.QAGate, ExportGame: step.ExportGame,
 			Prompt: "Role: " + step.Role + "\n" + step.Prompt + "\n\nGame brief:\n" + e.Brief, Commit: e.Commit}
 		if spec.Executor == "engine" {
 			spec.Executor = spec.Engine
 		}
 		if step.BaseFrom != "" {
-			predecessor := runs[step.BaseFrom].Result
-			if predecessor == nil || predecessor.Commit == "" {
-				if _, err := tx.Exec(ctx, `UPDATE executions SET status='failed' WHERE id=$1`, e.ID); err != nil {
-					return err
+			for i, source := range append([]string{step.BaseFrom}, step.MergeFrom...) {
+				predecessor := runs[source].Result
+				if predecessor == nil || predecessor.Commit == "" {
+					if _, err := tx.Exec(ctx, `UPDATE executions SET status='failed' WHERE id=$1`, e.ID); err != nil {
+						return err
+					}
+					return tx.Commit(ctx)
 				}
-				return tx.Commit(ctx)
+				if i == 0 {
+					spec.Commit = predecessor.Commit
+				} else {
+					spec.MergeCommits = append(spec.MergeCommits, predecessor.Commit)
+				}
 			}
-			spec.Commit = predecessor.Commit
 		}
 		if step.ReadOnly {
 			for _, dependency := range step.DependsOn {
@@ -349,10 +428,16 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 					return err
 				}
 				spec.Prompt += "\n\n" + engine.Name + " test evidence (test script output):\n" + strings.TrimSpace(evidence)
+				if prior.Result != nil && len(prior.Result.Artifacts) > 0 {
+					spec.Prompt += "\nBuild artifacts:\n"
+					for _, artifact := range prior.Result.Artifacts {
+						spec.Prompt += fmt.Sprintf("- %s (%d bytes)\n", artifact.Name, artifact.Bytes)
+					}
+				}
 			}
 		}
 		digest := sha256.Sum256([]byte(e.ID + "/" + step.ID))
-		if _, err := insertRun(ctx, tx, hex.EncodeToString(digest[:16]), spec, e.ID, step.ID); err != nil {
+		if _, err := insertRun(ctx, tx, hex.EncodeToString(digest[:16]), spec, e.ID, step.ID, 1); err != nil {
 			return err
 		}
 	}

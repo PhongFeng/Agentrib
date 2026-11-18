@@ -1,5 +1,20 @@
 package protocol
 
+// AgentStatus is reported for each installed Agent CLI. Account and quotas are
+// populated only when the provider can confirm them.
+type AgentStatus struct {
+	Account string       `json:"account,omitempty"`
+	Quotas  []AgentQuota `json:"quotas,omitempty"`
+}
+
+type AgentQuota struct {
+	Label         string  `json:"label,omitempty"`
+	Remaining     float64 `json:"remaining"`
+	Unit          string  `json:"unit"`
+	WindowMinutes int     `json:"window_minutes,omitempty"`
+	ResetsAt      int64   `json:"resets_at,omitempty"`
+}
+
 type Agent struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`

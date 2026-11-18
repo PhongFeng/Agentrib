@@ -21,7 +21,7 @@ func backendFor(agent protocol.Agent, path string) Backend {
 	case "codex":
 		return Codex{path}
 	case "qoder-cn":
-		return QoderCN{path}
+		return QoderCN{command: path}
 	case "minimax-code":
 		return MiniMaxCode{path}
 	default:

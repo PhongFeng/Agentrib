@@ -64,8 +64,15 @@ def smoke(api, machine, project):
                      and {"minimax-code", "codex", "godot", "qoder-cn"} <= set(m["executors"])), None)
 
     wait_for(online, "MiniMax Code, Codex, Godot and Qoder CN on the machine", 60)
-    workflow = api("/workflows/template")
-    workflow.update(id="acceptance-" + uuid4().hex[:8], name="Mac deployment acceptance")
+    workflow = {"id": "acceptance-" + uuid4().hex[:8], "name": "Mac deployment acceptance", "engine": "godot",
+                "steps": [{"id": "brief", "name": "Brief", "role": "Operator", "executor": "approval"},
+                          {"id": "ui", "name": "UI", "role": "Artist", "depends_on": ["brief"]},
+                          {"id": "build", "name": "Build", "role": "Developer", "depends_on": ["ui"], "base_from": "ui"},
+                          {"id": "tests", "name": "Tests", "role": "Build", "executor": "engine",
+                           "depends_on": ["build"], "base_from": "build"},
+                          {"id": "qa", "name": "QA", "role": "QA", "read_only": True,
+                           "depends_on": ["tests"], "base_from": "tests"},
+                          {"id": "release", "name": "Release", "role": "Operator", "executor": "approval", "depends_on": ["qa"]}]}
     for step in workflow["steps"]:
         if step["id"] == "ui":
             step["executor"] = "minimax-code"

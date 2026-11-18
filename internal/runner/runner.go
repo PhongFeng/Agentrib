@@ -21,18 +21,20 @@ import (
 )
 
 const (
-	heartbeatPeriod = 8 * time.Second
-	claimPeriod     = 2 * time.Second
-	reportPeriod    = 1500 * time.Millisecond
-	disconnectLimit = 28 * time.Second
-	maxJobDuration  = 20 * time.Minute
+	heartbeatPeriod     = 8 * time.Second
+	claimPeriod         = 2 * time.Second
+	reportPeriod        = 1500 * time.Millisecond
+	disconnectLimit     = 28 * time.Second
+	maxJobDuration      = 20 * time.Minute
+	workflowJobDuration = 2 * time.Hour
 )
 
 type Runner struct {
-	cfg      Config
-	client   *http.Client
-	backends map[string]Backend
-	engines  map[string]engineAdapter
+	cfg        Config
+	client     *http.Client
+	backends   map[string]Backend
+	engines    map[string]engineAdapter
+	agentPaths map[string]string
 }
 
 var errLease = errors.New("run lease no longer active")
@@ -40,17 +42,22 @@ var errToken = errors.New("runner token rejected")
 var runID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 
 func New(cfg Config) *Runner {
-	return &Runner{cfg: cfg, client: &http.Client{Timeout: 8 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return errors.New("runner API redirect refused") }},
-		backends: make(map[string]Backend), engines: make(map[string]engineAdapter)}
+	client := &http.Client{Timeout: 8 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return errors.New("runner API redirect refused") }}
+	if cfg.proxy != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = http.ProxyURL(cfg.proxy)
+		client.Transport = transport
+	}
+	return &Runner{cfg: cfg, client: client,
+		backends: make(map[string]Backend), engines: make(map[string]engineAdapter), agentPaths: make(map[string]string)}
 }
 
 func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
-	h := protocol.Heartbeat{Executors: []string{}, Projects: []string{}, ProjectEngines: make(map[string]string)}
-	for key, project := range r.cfg.Projects {
-		h.Projects = append(h.Projects, key)
-		h.ProjectEngines[key] = project.Engine
-	}
+	h := protocol.Heartbeat{Executors: []string{}, AgentStatuses: make(map[string]protocol.AgentStatus), BriefChat: true, ProductionWorkflow: true}
+	_, gitErr := findCommand("", "git")
+	h.CreateProjects = gitErr == nil
+	r.updateProjects(&h)
 	for _, agent := range protocol.Agents {
 		key := agent.ID
 		path, err := findCommand(r.cfg.Commands[key], agent.Commands...)
@@ -58,6 +65,8 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 			slog.Info("executor unavailable", "executor", key)
 			continue
 		}
+		r.agentPaths[key] = path
+		h.AgentStatuses[key] = protocol.AgentStatus{}
 		check, cancel := context.WithTimeout(ctx, 8*time.Second)
 		backend := backendFor(agent, path)
 		err = backend.Probe(check)
@@ -68,6 +77,9 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 		}
 		r.backends[key] = backend
 		h.Executors = append(h.Executors, key)
+		if key == "codex" {
+			h.AgentStatuses[key] = protocol.AgentStatus{Account: "signed_in"}
+		}
 	}
 	for key, adapter := range engineAdapters {
 		path, err := findCommand(r.cfg.Commands[key], adapter.commands...)
@@ -162,14 +174,16 @@ func (r *Runner) uploadArtifact(ctx context.Context, job protocol.Run, artifact 
 
 func (r *Runner) Run(ctx context.Context) error {
 	h := r.Detect(ctx)
-	if len(h.Executors) == 0 {
+	if len(h.Executors) == 0 && len(h.AgentStatuses) == 0 {
 		return errors.New("no usable Agent or game engine command found")
 	}
 	slog.Info("starting runner", "executors", h.Executors, "projects", h.Projects)
 	loop, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	connected := make(chan struct{})
-	go r.heartbeats(loop, stop, h, connected)
+	agentStatuses := make(chan map[string]protocol.AgentStatus, 1)
+	go r.pollAgentStatuses(loop, h.AgentStatuses, agentStatuses)
+	go r.heartbeats(loop, stop, h, agentStatuses, connected)
 	select {
 	case <-loop.Done():
 		return context.Cause(loop)
@@ -192,9 +206,16 @@ func (r *Runner) Run(ctx context.Context) error {
 	return context.Cause(loop)
 }
 
-func (r *Runner) heartbeats(ctx context.Context, stop context.CancelCauseFunc, heartbeat protocol.Heartbeat, connected chan struct{}) {
+func (r *Runner) heartbeats(ctx context.Context, stop context.CancelCauseFunc, heartbeat protocol.Heartbeat,
+	agentStatuses <-chan map[string]protocol.AgentStatus, connected chan struct{}) {
 	for ctx.Err() == nil {
-		err := r.post(ctx, "/heartbeat", heartbeat, nil)
+		select {
+		case heartbeat.AgentStatuses = <-agentStatuses:
+		default:
+		}
+		r.updateProjects(&heartbeat)
+		var reply protocol.HeartbeatReply
+		err := r.post(ctx, "/heartbeat", heartbeat, &reply)
 		if errors.Is(err, errToken) {
 			stop(err)
 			return
@@ -206,6 +227,19 @@ func (r *Runner) heartbeats(ctx context.Context, stop context.CancelCauseFunc, h
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("heartbeat failed", "error", err)
+		}
+		if err == nil {
+			previous := heartbeat.ProjectResult
+			heartbeat.ProjectResult = nil
+			if heartbeat.CreateProjects && reply.Project != nil && runID.MatchString(reply.Project.Attempt) {
+				if previous != nil && previous.Attempt == reply.Project.Attempt {
+					heartbeat.ProjectResult = previous
+					sleep(ctx, heartbeatPeriod)
+					continue
+				}
+				heartbeat.ProjectResult = r.initializeProject(ctx, *reply.Project)
+				continue
+			}
 		}
 		sleep(ctx, heartbeatPeriod)
 	}
@@ -237,7 +271,11 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 		return
 	}
 	logs := &eventBuffer{secret: r.cfg.token}
-	worker, cancel := context.WithTimeout(ctx, maxJobDuration)
+	duration := maxJobDuration
+	if job.ExecutionID != "" {
+		duration = workflowJobDuration
+	}
+	worker, cancel := context.WithTimeout(ctx, duration)
 	defer cancel()
 	finished := make(chan protocol.Result, 1)
 	go func() {
@@ -249,11 +287,15 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 			result.Status, result.Detail = "canceled", "Process stopped"
 		case errors.Is(worker.Err(), context.DeadlineExceeded):
 			result.Status, result.Detail = "failed", "Execution timed out"
+			logs.add("error", fmt.Sprintf("Execution timed out after %s", duration))
 		case err != nil:
 			result.Status, result.Detail = "failed", "Execution failed; see events"
 			logs.add("error", err.Error())
 		default:
 			result.Status, result.Detail = "succeeded", "Execution completed"
+		}
+		if result.Status != "succeeded" {
+			result.Reply = ""
 		}
 		finished <- result
 	}()
