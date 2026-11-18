@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { api, newID } from './api';
 import { BriefChat, clearBriefChats } from './brief-chat';
 
@@ -32,6 +32,31 @@ const quotaNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 })
 function runStatus(status: string, detail?: string) {
   if (status === 'failed' && detail === 'Execution timed out') return '执行超时';
   return label[status] || status;
+}
+
+const goodTones = new Set(['在线', 'CLI 已就绪', '额度可用', '已登录', '工作区就绪', '已通过', '已通知']);
+const warnTones = new Set(['额度受限', '需要认证', '等待确认', '等待依赖', '排队', '已领取', '等待创建工作区', 'CLI 未就绪']);
+const badTones = new Set(['离线', '失败', '失联', '执行超时', '工作区创建失败', '工作区暂不可用']);
+const infoTones = new Set(['运行中', '取消中']);
+function tone(text: string) {
+  if (goodTones.has(text)) return 'good';
+  if (warnTones.has(text)) return 'warn';
+  if (badTones.has(text)) return 'bad';
+  if (infoTones.has(text)) return 'info';
+  return 'neutral';
+}
+
+function BrandMark({ height = 20 }: { height?: number }) {
+  const id = useId().replace(/:/g, '');
+  return <svg className="brand-mark" width={Math.round(height * 220 / 96)} height={height} viewBox="20 82 220 96" fill="none" aria-hidden="true">
+    <defs><linearGradient id={id} x1="45" y1="130" x2="220" y2="130" gradientUnits="userSpaceOnUse">
+      <stop stopColor="#52D9C4" /><stop offset=".52" stopColor="#4BB9E8" /><stop offset="1" stopColor="#7189F5" />
+    </linearGradient></defs>
+    <g stroke={`url(#${id})`} strokeWidth="13" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M30 92h52c26 0 36 10 52 29l7 9c16 19 26 29 52 29h38" />
+      <path d="M30 168h52c26 0 36-10 52-29l7-9c16-19 26-29 52-29h38" />
+    </g>
+  </svg>;
 }
 
 function quotaText(quota: AgentQuota) {
@@ -256,11 +281,13 @@ export default function Console() {
   const delivered = deliveryFinished && qaRuns.length > 0 && qaRuns.every(item => item?.status === 'succeeded');
 
   return <>
-    <header><div className="frame header"><a className="brand" href="/">Agent<span>rib</span></a><span>游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
+    <header><div className="frame header"><a className="brand" href="/"><BrandMark height={20} /><span className="brand-name">Agent<span>rib</span></span></a><span className="header-sub">游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
     <main className="frame">
       {notice && <p className="notice" role="status">{notice}</p>}
       {!token ? <section className="panel login">
+        <BrandMark height={34} />
         <h1>连接控制面</h1>
+        <p className="login-sub">输入操作员令牌，接入工作室的研发流水线。</p>
         <form onSubmit={logIn}><label>操作员令牌<input type="password" value={inputToken} onChange={event => setInputToken(event.target.value)} autoComplete="off" required /></label><button className="primary" disabled={busy}>连接</button></form>
       </section> : <>
         <div className="console-tabs" role="tablist" aria-label="工作台视图" onKeyDown={event => {
@@ -280,7 +307,7 @@ export default function Console() {
           {machine ? <article className="machine">
             <div className="line">
               <strong>{machine.name}</strong>
-              <span className="state">{machineOnline ? '在线' : '离线'}</span>
+              <span className={'state ' + (machineOnline ? 'good' : 'bad')}>{machineOnline ? '在线' : '离线'}</span>
             </div>
             {!machineOnline && (machineAgents.length > 0 || machineEngines.length > 0) && <p>以下为 Runner 上次上报的信息。</p>}
             <div className="machine-capabilities">
@@ -292,7 +319,7 @@ export default function Console() {
                   const account = status?.account ? agentAccountLabel[status.account] : '';
                   const availability = !ready ? 'CLI 未就绪' : account || 'CLI 已就绪';
                   return <li key={agent.id}>
-                    <div className="line"><strong>{agent.name}</strong><span className="state">{availability}</span></div>
+                    <div className="line"><strong>{agent.name}</strong><span className={'state ' + tone(availability)}>{availability}</span></div>
                     {status?.quotas?.length ? <ul className="agent-quotas">{status.quotas.map((quota, index) => <li key={index}>
                       {quotaText(quota)}{quota.resets_at ? ' · ' + new Date(quota.resets_at * 1000).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) + ' 重置' : ''}
                     </li>)}</ul> : <p>额度未知</p>}
@@ -302,7 +329,7 @@ export default function Console() {
               <section aria-labelledby="machine-engines">
                 <h3 id="machine-engines">游戏引擎</h3>
                 {machineEngines.length ? <ul className="machine-inventory">{machineEngines.map(engine => <li key={engine.id}>
-                  <div className="line"><strong>{engine.name}</strong><span className="state">CLI 已就绪</span></div>
+                  <div className="line"><strong>{engine.name}</strong><span className="state good">CLI 已就绪</span></div>
                 </li>)}</ul> : <p>暂无引擎记录</p>}
               </section>
             </div>
@@ -323,7 +350,7 @@ export default function Console() {
           {machine && projects.length === 0 && <p>暂无游戏项目。</p>}
           {!machine && <p>接入执行机器后可查看和创建项目。</p>}
           {selectedProject && <div className="project-details">
-            <div className="line"><strong>{selectedProject.name === selectedProject.id ? engineName(selectedProject.engine) : selectedProject.id + ' · ' + engineName(selectedProject.engine)}</strong><span className="state" role="status">{projectStatus[selectedProject.status]}</span></div>
+            <div className="line"><strong>{selectedProject.name === selectedProject.id ? engineName(selectedProject.engine) : selectedProject.id + ' · ' + engineName(selectedProject.engine)}</strong><span className={'state ' + tone(projectStatus[selectedProject.status])} role="status">{projectStatus[selectedProject.status]}</span></div>
             {selectedProject.workspace && <p>Git 工作区 <code>{selectedProject.workspace}</code></p>}
             {selectedProject.error && <p>{selectedProject.error}</p>}
             {selectedProject.status === 'failed' && machine?.create_projects && <button disabled={busy} onClick={() => void action(() => requestProject({
@@ -482,7 +509,7 @@ export default function Console() {
             const repairs = [':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
-            return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
+            return <li key={step.id} data-tone={tone(runStatus(status, current?.result?.detail))}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
               {history.length > 0 && <details><summary>历史尝试</summary><div className="actions">{history.map(previous => <button key={previous.id} onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
               {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="actions">{repairs.map(repair => <button key={repair.id} onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>)}</div></details>}

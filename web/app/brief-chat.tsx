@@ -154,7 +154,7 @@ export function BriefChat({ token, machine, project, online, agents, onApply }: 
         {agent.id === 'codex' && <label>Codex 技能名（选填）<input value={skills} onChange={event => setSkills(event.target.value)}
           placeholder="填写 Mac mini 上安装的技能名，多个用逗号分隔" disabled={busy} /></label>}
       </div>
-      {messages.length > 0 && <ol className="brief-messages" aria-label="产品讨论">{messages.map((message, index) => <li key={index}>
+      {messages.length > 0 && <ol className="brief-messages" aria-label="产品讨论">{messages.map((message, index) => <li key={index} data-role={message.role}>
         <strong>{message.role === 'user' ? '你' : message.agent}{message.draft && ' · 简报草稿'}</strong>
         <p>{message.text}</p>
         {message.draft && <button type="button" onClick={() => { onApply(message.text); setNotice('已填入游戏简报，可以继续编辑。'); }}>使用这份简报</button>}
