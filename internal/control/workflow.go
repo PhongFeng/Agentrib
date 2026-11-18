@@ -17,10 +17,10 @@ var gameTemplate = protocol.Workflow{ID: "game-delivery", Name: "游戏制作与
 		Prompt: "阅读 docs/production/requirements.md 和 docs/production/art.md。制作任务要求的可用美术资源，按约定路径提交，并在 docs/production/art-handoff.md 记录文件、用途和接入说明。只修改本角色负责的资源和交接文档。"},
 	{ID: "audio", Name: "制作音效资源", Role: "音效 Agent", DependsOn: []string{"producer"}, BaseFrom: "producer",
 		Prompt: "阅读 docs/production/requirements.md 和 docs/production/audio.md。制作任务要求的可用音效和音乐，按约定路径提交，并在 docs/production/audio-handoff.md 记录文件、触发时机和接入说明。只修改本角色负责的资源和交接文档。"},
-	{ID: "develop", Name: "开发玩法并接入资源", Role: "开发 Agent", DependsOn: []string{"art", "audio"}, BaseFrom: "art", MergeFrom: []string{"audio"},
+	{ID: "develop", Name: "开发玩法并接入资源", Role: "开发 Agent", DependsOn: []string{"art", "audio"}, BaseFrom: "art", MergeFrom: []string{"audio"}, Preflight: true,
 		Prompt: "阅读 docs/production/requirements.md、development.md 和美术、音效交接文档。确认必要资源齐全，在合并后的版本接入真实资源并实现可玩的游戏。按验收标准补齐可运行的测试。Godot 项目需提交可用的 Web 导出预设，默认名为 Web，保留已有有效预设，并配置可运行的主场景。"},
 	{ID: "ci", Name: "CI 构建与测试", Role: "构建与测试", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true},
-	{ID: "qa", Name: "验收游戏", Role: "QA Agent", DependsOn: []string{"ci"}, BaseFrom: "ci", ReadOnly: true, QAGate: true,
+	{ID: "qa", Name: "验收游戏", Role: "QA Agent", DependsOn: []string{"ci"}, BaseFrom: "ci", ReadOnly: true, QAGate: true, QARework: true,
 		Prompt: "依据需求文档和已确认的简报，对集成后的游戏逐条验收。核对玩法、美术与音效接入、引擎测试证据以及导出结果。记录每条标准的结论、证据、复现步骤及发现的问题。仅在全部必要标准通过时判定可交付，缺少证据的必要标准标为未验证。"},
 	{ID: "release", Name: "通知交付", Role: "制作工作台", Executor: "notify", DependsOn: []string{"qa"}},
 }}
@@ -71,11 +71,17 @@ func validateWorkflow(workflow protocol.Workflow) error {
 		if step.ReadOnly && !agent.ReadOnly {
 			return fmt.Errorf("Selected executor does not support read-only step %s", step.ID)
 		}
-		if step.QAGate && !step.ReadOnly || step.ExportGame && step.Executor != "engine" && step.Executor != engine.ID {
+		builds := step.Executor == "engine" || step.Executor == engine.ID
+		if step.QAGate && !step.ReadOnly && !step.QARework || step.ExportGame && !builds ||
+			step.Preflight && (!usesAgent || step.ReadOnly || step.QAGate) || step.QARework && (!usesAgent || !step.QAGate) {
 			return fmt.Errorf("Invalid QA or export setting for %s", step.ID)
+		}
+		if _, ok := protocol.FindAgent(step.CIRepairAgent); step.CIRepairAgent != "" && (!builds || !ok) {
+			return fmt.Errorf("请选择有效的 CI 失败处理 Agent (%s)", step.ID)
 		}
 		steps[step.ID] = step
 	}
+	reviews := make(map[string]bool)
 	for _, step := range workflow.Steps {
 		deps := make(map[string]bool)
 		for _, id := range step.DependsOn {
@@ -98,6 +104,16 @@ func validateWorkflow(workflow protocol.Workflow) error {
 				return fmt.Errorf("Commit source for %s must be a unique direct executable dependency", step.ID)
 			}
 			sources[source] = true
+		}
+		if step.CIRepairAgent != "" && !steps[step.BaseFrom].Preflight {
+			return fmt.Errorf("CI 的提交来源必须开启开发交付检查 (%s)", step.ID)
+		}
+		if step.QARework {
+			ci := steps[step.BaseFrom]
+			if (ci.Executor != "engine" && ci.Executor != engine.ID) || !steps[ci.BaseFrom].Preflight || len(step.MergeFrom) != 0 || reviews[ci.ID] {
+				return fmt.Errorf("自动返工需要一个独立的 CI 提交来源，其开发步骤须开启交付检查 (%s)", step.ID)
+			}
+			reviews[ci.ID] = true
 		}
 	}
 	resolved := make(map[string]bool)

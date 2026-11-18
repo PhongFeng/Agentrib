@@ -54,7 +54,7 @@ func New(cfg Config) *Runner {
 }
 
 func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
-	h := protocol.Heartbeat{Executors: []string{}, AgentStatuses: make(map[string]protocol.AgentStatus), BriefChat: true, ProductionWorkflow: true}
+	h := protocol.Heartbeat{Executors: []string{}, AgentStatuses: make(map[string]protocol.AgentStatus), BriefChat: true, ProductionWorkflow: true, WorkflowReview: true}
 	_, gitErr := findCommand("", "git")
 	h.CreateProjects = gitErr == nil
 	r.updateProjects(&h)

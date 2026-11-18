@@ -201,7 +201,8 @@ func validSpec(spec protocol.Spec) bool {
 	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
 	agent, usesAgent := protocol.FindAgent(spec.Executor)
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
-		spec.BriefMode == "" && spec.RepairOf == "" && len(spec.MergeCommits) == 0 && !spec.QAGate && !spec.ExportGame &&
+		spec.BriefMode == "" && spec.RepairOf == "" && spec.RecheckOf == "" && !spec.Preflight && !spec.QARework &&
+		len(spec.MergeCommits) == 0 && !spec.QAGate && !spec.ExportGame &&
 		known && engine.Implemented && (usesAgent || spec.Executor == engine.ID) &&
 		(!spec.ReadOnly || agent.ReadOnly) &&
 		validText(spec.Title, 200) && len(spec.Prompt) <= 16000 && !strings.ContainsRune(spec.Prompt, 0) &&
@@ -359,6 +360,9 @@ func validResult(result *protocol.Result) bool {
 		return false
 	}
 	if result.Reply != "" && (result.Status != "succeeded" || !validText(result.Reply, protocol.MaxBriefBytes)) {
+		return false
+	}
+	if len(result.Bugs) > 0 && (result.Status != "failed" || !protocol.ValidBugs(result.Bugs)) {
 		return false
 	}
 	for _, artifact := range result.Artifacts {

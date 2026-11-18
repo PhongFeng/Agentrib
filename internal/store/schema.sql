@@ -13,6 +13,7 @@ ALTER TABLE machines ADD COLUMN IF NOT EXISTS create_projects boolean NOT NULL D
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_statuses jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS brief_chat boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS production_workflow boolean NOT NULL DEFAULT false;
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS workflow_review boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS game_projects (
     machine_id text NOT NULL REFERENCES machines(id),

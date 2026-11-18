@@ -6,15 +6,16 @@ import { BriefChat, clearBriefChats } from './brief-chat';
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
-type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; seen: string };
+type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; seen: string };
 type ProjectInput = { id: string; name: string; engine: string };
 type Project = ProjectInput & { workspace?: string; status: 'ready' | 'pending' | 'failed' | 'unavailable'; error?: string };
 type Engine = { id: string; name: string; implemented: boolean };
 type Agent = { id: string; name: string; commands: string[]; read_only: boolean };
-type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string; merge_from?: string[]; qa_gate?: boolean; export_game?: boolean };
+type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string; merge_from?: string[]; qa_gate?: boolean; export_game?: boolean; ci_repair_agent?: string; preflight?: boolean; qa_rework?: boolean };
 type Workflow = { id: string; version: number; name: string; engine?: string; steps: Step[] };
 type Artifact = { name: string; sha256: string; bytes: number };
-type Run = { id: string; step_id?: string; attempt?: number; status: string; spec: { title: string; executor: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[] } };
+type Bug = { owner: 'art' | 'audio' | 'develop' | 'environment'; title: string; steps: string; expected: string; actual: string };
+type Run = { id: string; step_id?: string; attempt?: number; status: string; spec: { title: string; executor: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[]; bugs?: Bug[] } };
 type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[] };
 type RunEvent = { seq: number; kind: string; text: string };
 type View = 'workbench' | 'history';
@@ -226,10 +227,11 @@ export default function Console() {
   const savedEngine = engines.find(engine => engine.id === (saved?.engine || 'godot'));
   const engineChanged = saved && (saved.engine || 'godot') !== (draft?.engine || 'godot');
   const agentsByID = new Map(agents.map(agent => [agent.id, agent]));
-  const missingAgents = machine ? agents.filter(agent => saved?.steps.some(step => step.executor === agent.id) &&
+  const missingAgents = machine ? agents.filter(agent => saved?.steps.some(step => step.executor === agent.id || step.ci_repair_agent === agent.id) &&
     !machine.executors.includes(agent.id)) : [];
   const projectMatches = selectedProject?.engine === savedEngine?.id;
-  const requiresRunnerUpdate = !machine?.production_workflow && saved?.steps.some(step => step.merge_from?.length || step.qa_gate || step.export_game);
+  const requiresRunnerUpdate = (!machine?.production_workflow && saved?.steps.some(step => step.merge_from?.length || step.qa_gate || step.export_game)) ||
+    (!machine?.workflow_review && saved?.steps.some(step => step.preflight || step.qa_rework));
   const availableForRun = !requiresRunnerUpdate && !engineChanged && !missingAgents.length && savedEngine?.implemented && projectReady && projectMatches &&
     (!saved?.steps.some(step => step.executor === 'engine' || step.executor === savedEngine.id) || machine?.executors.includes(savedEngine.id));
   const engineName = (id = 'godot') => engines.find(engine => engine.id === id)?.name || id;
@@ -246,15 +248,12 @@ export default function Console() {
   const currentRuns = Array.from(attemptsByStep.values(), attempts => attempts[0]);
   const completed = new Set(execution?.approved || []);
   for (const current of currentRuns) if (current.status === 'succeeded' && current.step_id) completed.add(current.step_id);
-  const historySteps = execution?.workflow?.steps.flatMap(step => {
-    const repairID = step.id + ':repair';
-    const repair = attemptsByStep.get(repairID)?.[0];
-    return repair ? [step, { ...step, id: repairID, name: '修复 CI 构建与测试', role: '开发 Agent', executor: repair.spec.executor, depends_on: [] }] : [step];
-  });
   const canContinue = execution?.status === 'failed' && currentRuns.some(current => ['failed', 'lost', 'canceled'].includes(current.status));
-  const delivered = execution?.status === 'succeeded' && execution.workflow?.steps.some(step => step.executor === 'notify' && completed.has(step.id));
+  const deliveryFinished = execution?.status === 'succeeded' && execution.workflow?.steps.some(step => step.executor === 'notify' && completed.has(step.id));
   const exportRun = currentRuns.find(item => item.status === 'succeeded' && item.result?.artifacts?.some(artifact => artifact.name === 'godot-web.zip'));
-  const qaRun = currentRuns.find(item => item.status === 'succeeded' && execution?.workflow?.steps.some(step => step.qa_gate && step.id === item.step_id));
+  const qaRuns = (execution?.workflow?.steps || []).filter(step => step.qa_gate).map(step => attemptsByStep.get(step.id)?.[0]);
+  const qaRun = qaRuns.find(item => item?.status === 'succeeded');
+  const delivered = deliveryFinished && qaRuns.length > 0 && qaRuns.every(item => item?.status === 'succeeded');
 
   return <>
     <header><div className="frame header"><a className="brand" href="/">Agent<span>rib</span></a><span>游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
@@ -370,9 +369,12 @@ export default function Console() {
               <div className="fields"><label>标识<input value={step.id} onChange={event => updateStep(index, { id: event.target.value })} /></label><label>名称<input value={step.name} onChange={event => updateStep(index, { name: event.target.value })} /></label><label>角色<input value={step.role} onChange={event => updateStep(index, { role: event.target.value })} /></label><label>执行方式<select value={step.executor} onChange={event => {
                 const executor = event.target.value;
                 const readOnly = Boolean(step.read_only && agentsByID.get(executor)?.read_only);
+                const isEngine = executor === 'engine' || executor === (draft.engine || 'godot');
+                const qaRework = Boolean(step.qa_rework && agentsByID.has(executor));
                 updateStep(index, {
-                  executor, read_only: readOnly, qa_gate: Boolean(step.qa_gate && readOnly),
-                  export_game: Boolean(step.export_game && (executor === 'engine' || executor === (draft.engine || 'godot'))),
+                  executor, read_only: readOnly, qa_gate: Boolean(step.qa_gate && (readOnly || qaRework)), qa_rework: qaRework,
+                  preflight: Boolean(step.preflight && !readOnly && agentsByID.has(executor)),
+                  export_game: Boolean(step.export_game && isEngine), ci_repair_agent: isEngine ? step.ci_repair_agent : '',
                   ...(executor === 'approval' || executor === 'notify' ? { base_from: '', merge_from: [] } : {}),
                 });
               }}>
@@ -396,9 +398,15 @@ export default function Console() {
                   })} />{id}</label>)}
               </fieldset>}
               {(!step.executor || agentsByID.has(step.executor)) && <label>任务说明<textarea value={step.prompt || ''} onChange={event => updateStep(index, { prompt: event.target.value })} /></label>}
-              {(!step.executor || agentsByID.get(step.executor)?.read_only) && <label className="check"><input type="checkbox" checked={step.read_only || false} onChange={event => updateStep(index, { read_only: event.target.checked, qa_gate: Boolean(event.target.checked && step.qa_gate) })} />只读验收</label>}
-              {step.read_only && <label className="check"><input type="checkbox" checked={step.qa_gate || false} onChange={event => updateStep(index, { qa_gate: event.target.checked })} />验收通过后才允许交付</label>}
+              {(!step.executor || agentsByID.get(step.executor)?.read_only) && <label className="check"><input type="checkbox" checked={step.read_only || false} onChange={event => updateStep(index, { read_only: event.target.checked, qa_gate: Boolean((event.target.checked || step.qa_rework) && step.qa_gate), preflight: event.target.checked ? false : step.preflight })} />只读验收</label>}
+              {(step.read_only || step.qa_rework) && <label className="check"><input type="checkbox" checked={step.qa_gate || false} disabled={step.qa_rework} onChange={event => updateStep(index, { qa_gate: event.target.checked, preflight: event.target.checked ? false : step.preflight })} />验收通过后才允许交付</label>}
+              {(!step.executor || agentsByID.has(step.executor)) && !step.read_only && !step.qa_gate && <label className="check"><input type="checkbox" checked={step.preflight || false} onChange={event => updateStep(index, { preflight: event.target.checked })} />提交给 CI 前检查编译与启动</label>}
+              {(!step.executor || agentsByID.has(step.executor)) && <label className="check"><input type="checkbox" checked={step.qa_rework || false} onChange={event => updateStep(index, { qa_rework: event.target.checked, qa_gate: event.target.checked || Boolean(step.read_only && step.qa_gate), preflight: event.target.checked ? false : step.preflight })} />验收失败后派发缺陷单并复验</label>}
               {engineStep && <label className="check"><input type="checkbox" checked={step.export_game || false} onChange={event => updateStep(index, { export_game: event.target.checked })} />必须生成试玩包</label>}
+              {engineStep && <label>CI 失败处理 Agent<select value={step.ci_repair_agent || ''} onChange={event => updateStep(index, { ci_repair_agent: event.target.value })}>
+                <option value="">未指定（代码问题交给开发 Agent）</option>
+                {agents.map(agent => <option value={agent.id} key={agent.id}>{agent.name}</option>)}
+              </select></label>}
               <button className="text-button" disabled={draft.steps.length === 1} onClick={() => setDraft({ ...draft, steps: draft.steps.filter((_, i) => i !== index) })}>移除步骤</button>
             </fieldset>})}</div>
             <div className="actions"><button onClick={() => setDraft({ ...draft, steps: [...draft.steps, { id: 'step-' + newID().slice(0, 6), name: '', role: '', executor: '', depends_on: [] }] })}>添加步骤</button><button className="primary" disabled={busy || draft.steps.some(step => !step.executor)} onClick={() => void action(async () => {
@@ -462,19 +470,22 @@ export default function Console() {
               } : current);
             })}>从失败处继续</button>
           </div>}
-          {delivered && <div className="notice">
-            <p role="status">游戏制作已完成，可以交付。</p>
+          {deliveryFinished && <div className="notice">
+            <p role="status">{delivered ? 'QA 已通过，可以交付。' : '工作流已结束，未记录 QA 通过。'}</p>
             {(qaRun || exportRun) && <div className="actions">
               {qaRun && <button onClick={() => { if (qaRun.id !== runID) selectRun(qaRun.id); }}>查看 QA 报告</button>}
               {exportRun && <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, 'godot-web.zip'))}>下载试玩包</button>}
             </div>}
           </div>}
-          {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{historySteps?.map(step => {
+          {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{execution.workflow.steps.map(step => {
             const [current, ...history] = attemptsByStep.get(step.id) || [];
+            const repairs = [':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
             return <li key={step.id}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
               {history.length > 0 && <details><summary>历史尝试</summary><div className="actions">{history.map(previous => <button key={previous.id} onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>)}</div></details>}
+              {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
+              {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="actions">{repairs.map(repair => <button key={repair.id} onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>)}</div></details>}
             </div><div className="actions">
               {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
@@ -482,6 +493,10 @@ export default function Console() {
           })}</ol></>}
           {run && <article className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
             {run.result && <p>{run.result.detail === 'Execution timed out' ? '执行超时' : run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
+            {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>QA-{run.id.slice(0, 7)}-{i + 1} · {bug.title}</strong>
+              <p>负责角色　{{ art: '美术 Agent', audio: '音效 Agent', develop: '开发 Agent', environment: '执行环境' }[bug.owner] || bug.owner}</p>
+              <p>复现　{bug.steps}</p><p>预期　{bug.expected}</p><p>实际　{bug.actual}</p>
+            </li>)}</ol></section>}
             {run.result?.artifacts?.length ? <ul>{run.result.artifacts.map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul> : null}
             <pre className="log" aria-label="执行日志">{events.length ? events.map(event => `[${event.kind}] ${event.text}`).join('\n') : '等待执行日志…'}</pre>
           </article>}

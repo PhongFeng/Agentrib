@@ -109,6 +109,12 @@ func (s *Store) StartExecution(ctx context.Context, input protocol.ExecutionInpu
 		if !machine.ProductionWorkflow && (len(step.MergeFrom) > 0 || step.QAGate || step.ExportGame) {
 			return protocol.Execution{}, ErrProductionUnavailable
 		}
+		if (step.Preflight || step.QARework) && !machine.WorkflowReview {
+			return protocol.Execution{}, ErrProductionUnavailable
+		}
+		if agent, ok := protocol.FindAgent(step.CIRepairAgent); ok && !slices.Contains(machine.Executors, agent.ID) {
+			return protocol.Execution{}, fmt.Errorf("%w: %s", ErrAgentUnavailable, agent.Name)
+		}
 		if agent, ok := protocol.FindAgent(step.Executor); ok && !slices.Contains(machine.Executors, agent.ID) {
 			return protocol.Execution{}, fmt.Errorf("%w: %s", ErrAgentUnavailable, agent.Name)
 		}
@@ -238,7 +244,7 @@ func (s *Store) ContinueExecution(ctx context.Context, id string) (protocol.Exec
 		if !interrupted(prior.Status) {
 			continue
 		}
-		handled, err := handleCIFailure(ctx, tx, e, step, latest, true)
+		handled, err := handleStepFailure(ctx, tx, e, step, latest, true)
 		if err != nil {
 			return e, err
 		}
@@ -354,10 +360,14 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 	done, runs := outcomes(e)
 	failed := false
 	complete := true
+	reviewComplete := true
 	for _, step := range e.Workflow.Steps {
 		complete = complete && done[step.ID]
+		if step.QARework {
+			reviewComplete = reviewComplete && done[step.ID]
+		}
 		if interrupted(runs[step.ID].Status) {
-			handled, err := handleCIFailure(ctx, tx, e, step, runs, false)
+			handled, err := handleStepFailure(ctx, tx, e, step, runs, false)
 			if err != nil {
 				return err
 			}
@@ -379,6 +389,9 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 			continue
 		}
 		if step.Executor == "notify" {
+			if !reviewComplete {
+				continue
+			}
 			if _, err := tx.Exec(ctx, `INSERT INTO step_approvals (execution_id,step_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, e.ID, step.ID); err != nil {
 				return err
 			}
@@ -386,7 +399,7 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		}
 		spec := protocol.Spec{MachineID: e.MachineID, Project: e.Project, Executor: step.Executor,
 			Engine: e.Workflow.Engine, Title: step.Name, ReadOnly: step.ReadOnly, QAGate: step.QAGate, ExportGame: step.ExportGame,
-			Prompt: "Role: " + step.Role + "\n" + step.Prompt + "\n\nGame brief:\n" + e.Brief, Commit: e.Commit}
+			Preflight: step.Preflight, QARework: step.QARework, Prompt: workflowPrompt(step, e.Brief), Commit: e.Commit}
 		if spec.Executor == "engine" {
 			spec.Executor = spec.Engine
 		}
@@ -406,33 +419,10 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 				}
 			}
 		}
-		if step.ReadOnly {
+		if step.ReadOnly || step.QARework {
 			for _, dependency := range step.DependsOn {
-				prior := runs[dependency]
-				engine, ok := protocol.FindEngine(prior.Spec.Executor)
-				if !ok {
-					continue
-				}
-				var evidence string
-				if err := tx.QueryRow(ctx, `WITH test_start AS (
-					SELECT max(seq) AS seq FROM run_events WHERE run_id=$1 AND kind='tool' AND body LIKE 'godot --script %'
-				), test_end AS (
-					SELECT coalesce(min(e.seq),10001) AS seq FROM run_events e,test_start s
-					WHERE e.run_id=$1 AND e.kind='tool' AND e.seq>s.seq
-				)
-				SELECT coalesce(string_agg(body,chr(10) ORDER BY seq),'') FROM (
-					SELECT e.seq,left(e.body,240) AS body FROM run_events e,test_start s,test_end f
-					WHERE e.run_id=$1 AND (e.kind='test' OR ($2='godot' AND e.kind='godot' AND e.seq>s.seq AND e.seq<f.seq))
-					ORDER BY e.seq DESC LIMIT 16
-				) AS lines`, prior.ID, engine.ID).Scan(&evidence); err != nil {
+				if err := appendBuildEvidence(ctx, tx, &spec, runs[dependency]); err != nil {
 					return err
-				}
-				spec.Prompt += "\n\n" + engine.Name + " test evidence (test script output):\n" + strings.TrimSpace(evidence)
-				if prior.Result != nil && len(prior.Result.Artifacts) > 0 {
-					spec.Prompt += "\nBuild artifacts:\n"
-					for _, artifact := range prior.Result.Artifacts {
-						spec.Prompt += fmt.Sprintf("- %s (%d bytes)\n", artifact.Name, artifact.Bytes)
-					}
 				}
 			}
 		}
@@ -442,4 +432,37 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func workflowPrompt(step protocol.Step, brief string) string {
+	return "Role: " + step.Role + "\n" + step.Prompt + "\n\nGame brief:\n" + brief
+}
+
+func appendBuildEvidence(ctx context.Context, tx pgx.Tx, spec *protocol.Spec, prior protocol.Run) error {
+	engine, ok := protocol.FindEngine(prior.Spec.Executor)
+	if !ok || prior.Result == nil {
+		return nil
+	}
+	var evidence string
+	if err := tx.QueryRow(ctx, `WITH test_start AS (
+		SELECT max(seq) AS seq FROM run_events WHERE run_id=$1 AND kind='tool' AND body LIKE 'godot --script %'
+	), test_end AS (
+		SELECT coalesce(min(e.seq),10001) AS seq FROM run_events e,test_start s
+		WHERE e.run_id=$1 AND e.kind='tool' AND e.seq>s.seq
+	)
+	SELECT coalesce(string_agg(body,chr(10) ORDER BY seq),'') FROM (
+		SELECT e.seq,left(e.body,240) AS body FROM run_events e,test_start s,test_end f
+		WHERE e.run_id=$1 AND (e.kind='test' OR ($2='godot' AND e.kind='godot' AND e.seq>s.seq AND e.seq<f.seq))
+		ORDER BY e.seq DESC LIMIT 16
+	) AS lines`, prior.ID, engine.ID).Scan(&evidence); err != nil {
+		return err
+	}
+	spec.Prompt += "\n\n" + engine.Name + " test evidence (test script output):\n" + strings.TrimSpace(evidence)
+	if prior.Result != nil && len(prior.Result.Artifacts) > 0 {
+		spec.Prompt += "\nBuild artifacts:\n"
+		for _, artifact := range prior.Result.Artifacts {
+			spec.Prompt += fmt.Sprintf("- %s (%d bytes)\n", artifact.Name, artifact.Bytes)
+		}
+	}
+	return nil
 }

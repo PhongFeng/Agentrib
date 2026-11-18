@@ -81,7 +81,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	}
 	engineBuild := run.Spec.Executor == engineID
 	brief := run.Spec.BriefMode != ""
-	if (brief || run.Spec.QAGate) && (!run.Spec.ReadOnly || engineBuild) {
+	if (brief || run.Spec.QAGate && !run.Spec.QARework) && (!run.Spec.ReadOnly || engineBuild) {
 		return result, errors.New("brief and QA require a read-only Agent")
 	}
 	checkout := filepath.Join(r.cfg.State, "worktrees", run.ID)
@@ -159,22 +159,51 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	}
 	var finalReply string
 	if brief {
-		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, emit)
+		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, true, emit)
 	} else {
 		mode := "Keep all edits in this worktree. The Runner records the final changes as a local Git commit."
 		if run.Spec.ReadOnly {
 			mode = "Review the checked-out version. Do not change source files. Report findings and the evidence you used."
+		} else if run.Spec.QARework {
+			mode = "Review the exact CI revision in a disposable worktree. Temporary untracked test files are allowed. Do not modify tracked files or make commits."
 		}
 		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
 		if run.Spec.QAGate {
 			prompt += "\n\n验收报告的首行必须单独写 QA: PASS 或 QA: FAIL。全部必要标准均有证据且通过时使用 QA: PASS。否则使用 QA: FAIL。正文写明每项结论与证据。"
-			finalReply, err = r.finalAgentReply(ctx, backend, dir, prompt, emit)
+			if run.Spec.QARework {
+				prompt += qaReworkInstructions
+			}
+			finalReply, err = r.finalAgentReply(ctx, backend, dir, prompt, run.Spec.ReadOnly, emit)
 		} else {
 			err = backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit)
 		}
 	}
 	if err != nil {
 		return result, err
+	}
+	if run.Spec.QARework {
+		head, err := git(ctx, checkout, "rev-parse", "HEAD")
+		if err != nil {
+			return result, err
+		}
+		statusArgs := []string{"status", "--porcelain"}
+		if !run.Spec.ReadOnly {
+			statusArgs = append(statusArgs, "--untracked-files=no")
+		}
+		changes, err := git(ctx, checkout, statusArgs...)
+		if err != nil {
+			return result, err
+		}
+		if head != base || changes != "" {
+			return result, errors.New("QA 修改了待验收版本")
+		}
+		return reviewRevision(result, finalReply, emit)
+	}
+	if run.Spec.Preflight {
+		if err := adapter.Check(ctx, dir, emit); err != nil {
+			return result, fmt.Errorf("开发交付检查未通过: %w", err)
+		}
+		emit("status", "开发交付检查已通过")
 	}
 	changes, err := git(ctx, checkout, "status", "--porcelain")
 	if err != nil {
@@ -255,25 +284,12 @@ func (g godotEngine) Build(ctx context.Context, dir, out string, project Project
 	}
 	defer log.Close()
 	execGodot := func(args ...string) error {
-		emit("tool", "godot "+strings.Join(args, " "))
-		cmd := command(ctx, dir, g.command, append([]string{"--headless", "--path", dir}, args...)...)
-		kind := "godot"
-		if args[0] == "--script" {
-			kind = "test"
-		}
-		var scriptError bool
-		lines := &lineWriter{writeLine: func(s string) {
-			_, _ = fmt.Fprintln(log, s)
-			emit(kind, s)
-			scriptError = scriptError || strings.Contains(s, "SCRIPT ERROR:") || strings.Contains(s, "Parse Error:")
-		}}
-		cmd.Stdout, cmd.Stderr = lines, lines
-		err := cmd.Run()
-		lines.flush()
-		if err == nil && scriptError {
-			return errors.New("Godot reported a script or import error")
-		}
-		return err
+		return g.run(ctx, dir, func(kind, text string) {
+			if kind != "tool" {
+				_, _ = fmt.Fprintln(log, text)
+			}
+			emit(kind, text)
+		}, args...)
 	}
 	checkErr := execGodot("--import")
 	if checkErr == nil {
