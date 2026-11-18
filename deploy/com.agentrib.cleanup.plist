@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentrib.cleanup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__STATE__/bin/clean-scratch.sh</string>
+        <string>__STATE__</string>
+        <string>7</string>
+        <string>projects</string>
+        <string>worktrees</string>
+        <string>artifacts</string>
+        <string>bin</string>
+        <string>tools</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__STATE__/cleanup.log</string>
+    <key>StandardErrorPath</key>
+    <string>__STATE__/cleanup.log</string>
+</dict>
+</plist>
