@@ -200,15 +200,22 @@ export default function Console() {
   }
 
   async function downloadArtifact(id: string, name: string) {
-    const response = await fetch(`/api/v1/runs/${id}/artifacts/${encodeURIComponent(name)}`, {
+    const path = `/api/v1/runs/${id}/artifacts/${encodeURIComponent(name)}`;
+    const response = await fetch(path, {
+      method: 'POST',
       headers: { Authorization: 'Bearer ' + token },
+      signal: AbortSignal.timeout(15000),
     });
+    if (response.status === 401) throw new Error('下载授权已失效，请重新连接控制面。');
+    if (response.status === 404) throw new Error(`服务器上找不到 ${name}。`);
     if (!response.ok) throw new Error(`无法下载 ${name}`);
-    const url = URL.createObjectURL(await response.blob());
     const link = document.createElement('a');
-    link.href = url; link.download = name;
+    link.href = path;
+    link.download = name;
+    document.body.append(link);
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    link.remove();
+    setNotice('已交给浏览器下载，可在浏览器的下载列表里查看进度。');
   }
 
   function updateStep(index: number, change: Partial<Step>) {

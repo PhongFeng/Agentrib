@@ -45,7 +45,8 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("POST /api/v1/brief-turns", a.asOperator(a.createBriefTurn))
 	mux.HandleFunc("GET /api/v1/runs/{id}", a.asOperator(a.run))
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
-	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.download))
+	mux.HandleFunc("POST /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.authorizeDownload))
+	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.download)
 	mux.HandleFunc("GET /api/v1/workflows", a.asOperator(a.workflows))
 	mux.HandleFunc("GET /api/v1/agents", a.asOperator(func(w http.ResponseWriter, _ *http.Request) {
 		send(w, http.StatusOK, protocol.Agents)
@@ -118,10 +119,14 @@ func bearer(r *http.Request) string {
 	return token
 }
 
+func (a *API) isOperator(r *http.Request) bool {
+	digest := sha256.Sum256([]byte(bearer(r)))
+	return subtle.ConstantTimeCompare(digest[:], a.operator[:]) == 1
+}
+
 func (a *API) asOperator(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		digest := sha256.Sum256([]byte(bearer(r)))
-		if subtle.ConstantTimeCompare(digest[:], a.operator[:]) != 1 {
+		if !a.isOperator(r) {
 			problem(w, http.StatusUnauthorized, "Operator token required")
 			return
 		}
