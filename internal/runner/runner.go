@@ -26,7 +26,7 @@ const (
 	reportPeriod        = 1500 * time.Millisecond
 	disconnectLimit     = 28 * time.Second
 	maxJobDuration      = 20 * time.Minute
-	workflowJobDuration = 2 * time.Hour
+	workflowJobDuration = 12 * time.Hour
 )
 
 type Runner struct {
