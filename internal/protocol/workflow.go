@@ -77,6 +77,7 @@ type Assignment struct {
 }
 
 type QADecision struct {
+	Deferred         map[string]string     `json:"deferred,omitempty"`
 	ResumeAfter      string                `json:"resume_after,omitempty"`
 	Dispatch         string                `json:"dispatch,omitempty"`
 	Recheck          bool                  `json:"recheck,omitempty"`
@@ -86,11 +87,12 @@ type QADecision struct {
 }
 
 type QAReview struct {
-	Assignments map[string]Assignment `json:"assignments,omitempty"`
-	RunID       string                `json:"run_id"`
-	Phase       string                `json:"phase"`
-	Reason      string                `json:"reason"`
-	Roles       []string              `json:"roles,omitempty"`
+	EnvironmentTickets []string              `json:"environment_tickets,omitempty"`
+	Assignments        map[string]Assignment `json:"assignments,omitempty"`
+	RunID              string                `json:"run_id"`
+	Phase              string                `json:"phase"`
+	Reason             string                `json:"reason"`
+	Roles              []string              `json:"roles,omitempty"`
 }
 
 type Execution struct {

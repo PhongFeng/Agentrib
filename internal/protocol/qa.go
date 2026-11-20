@@ -12,8 +12,9 @@ var ticketID = regexp.MustCompile(`^QA-([0-9a-f]{7}|[0-9a-f]{32})-[1-8]$`)
 
 type Ticket struct {
 	Bug
-	Helpers []string `json:"helpers,omitempty"`
-	Closed  bool     `json:"closed"`
+	Helpers        []string `json:"helpers,omitempty"`
+	Closed         bool     `json:"closed"`
+	DeferredReason string   `json:"deferred_reason,omitempty"`
 }
 
 func ValidVerified(ids []string, bugs []Bug) bool {
@@ -47,7 +48,9 @@ func TrackTickets(runs []Run, step string, decisions map[string]QADecision) []Ti
 	for _, run := range attempts {
 		if run.Status == "succeeded" {
 			for i := range tickets {
-				tickets[i].Closed = true
+				if tickets[i].DeferredReason == "" {
+					tickets[i].Closed = true
+				}
 			}
 			continue
 		}
@@ -57,6 +60,7 @@ func TrackTickets(runs []Run, step string, decisions map[string]QADecision) []Ti
 		for i := range tickets {
 			if slices.Contains(run.Result.Verified, tickets[i].ID) {
 				tickets[i].Closed = true
+				tickets[i].DeferredReason = ""
 			}
 		}
 		used := make(map[string]bool)
@@ -76,7 +80,14 @@ func TrackTickets(runs []Run, step string, decisions map[string]QADecision) []Ti
 				tickets = append(tickets, Ticket{Bug: bug})
 			} else {
 				bug.ID = tickets[index].ID
+				reason := tickets[index].DeferredReason
 				tickets[index] = Ticket{Bug: bug}
+				if bug.Owner == "environment" {
+					tickets[index].DeferredReason = reason
+				}
+			}
+			if reason := decisions[run.ID].Deferred[bug.ID]; bug.Owner == "environment" && reason != "" {
+				tickets[index].DeferredReason = reason
 			}
 			if assignment, ok := decisions[run.ID].Assignments[bug.ID]; ok {
 				tickets[index].Owner = assignment.Owner

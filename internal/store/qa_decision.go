@@ -53,6 +53,19 @@ func (s *Store) DecideQA(ctx context.Context, id, runID, action string, input pr
 				return ErrConflict
 			}
 			d.EnvironmentReady = true
+		case "defer_ticket":
+			if review.Phase != "environment" || len(input.Deferred) != 1 {
+				return ErrConflict
+			}
+			for ticketID, reason := range input.Deferred {
+				if !slices.Contains(review.EnvironmentTickets, ticketID) || strings.TrimSpace(reason) == "" {
+					return ErrConflict
+				}
+				if d.Deferred == nil {
+					d.Deferred = make(map[string]string)
+				}
+				d.Deferred[ticketID] = strings.TrimSpace(reason)
+			}
 		case "stop":
 			if _, err := tx.Exec(ctx, `UPDATE executions SET status='canceled',qa_phase='' WHERE id=$1`, id); err != nil {
 				return err

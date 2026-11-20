@@ -124,18 +124,34 @@ func planQA(e protocol.Execution, step protocol.Step, runs map[string]protocol.R
 		}
 	}
 	if rebuilt || len(bugs) == 0 || decision.Recheck {
-		if len(bugs) < len(qa.Result.Bugs) && !decision.EnvironmentReady {
-			return p.state("environment", "请恢复 QA 执行环境，再对当前构建补验")
-		}
 		spec := qa.Spec
 		var open []protocol.Bug
+		var deferred strings.Builder
+		deferredIDs := make(map[string]bool)
 		for _, t := range e.Tickets[step.ID] {
-			if !t.Closed {
+			if t.DeferredReason != "" {
+				deferredIDs[t.ID] = true
+				fmt.Fprintf(&deferred, "- %s %s\n  延期说明：%s\n  本轮延期的检查：%s\n", t.ID, t.Title, t.DeferredReason, t.Expected)
+			} else if !t.Closed {
 				open = append(open, t.Bug)
 			}
 		}
+		for _, bug := range qa.Result.Bugs {
+			if bug.Owner == "environment" && !deferredIDs[bug.ID] {
+				p.EnvironmentTickets = append(p.EnvironmentTickets, bug.ID)
+			}
+		}
+		if len(p.EnvironmentTickets) > 0 && !decision.EnvironmentReady {
+			return p.state("environment", "请恢复 QA 执行环境，再对当前构建补验")
+		}
+		if len(bugs) == 0 && len(p.EnvironmentTickets) == 0 && len(decision.Deferred) == 0 && !decision.Recheck {
+			return p.state("product_review", "QA 仍报告已延期的检查，请产品补充说明后复验")
+		}
 		spec.Commit = ci.Result.Commit
 		spec.Prompt = workflowPrompt(step, e.Brief) + "\n复验下列未关闭缺陷及其余必要标准，记录原编号。\n" + bugEvidence(open) + "\n产品补充说明：\n" + decision.Note
+		if deferred.Len() > 0 {
+			spec.Prompt += "\n\n操作员已批准将下列检查从本轮必要验收范围中延期。仅对列出的检查免除本轮实测，继续验收其他要求。延期检查保留未验证，不能计入 verified 或作为本轮 FAIL 的唯一依据。\n" + deferred.String()
+		}
 		p.stepID, p.spec, p.build = step.ID, spec, ci
 		return p.state("rechecking", "等待 QA 复验当前构建")
 	}
