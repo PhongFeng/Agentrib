@@ -210,7 +210,7 @@ func hydrate(ctx context.Context, db queryer, e protocol.Execution) (protocol.Ex
 			continue
 		}
 		e.Tickets[step.ID] = tickets
-		p := planQA(e, step, latest, false)
+		p := planQA(e, step, latest, e.Status == "failed")
 		if p.Phase != "" {
 			e.Reviews[step.ID] = p.QAReview
 		} else if r := latest[step.ID]; pending(r) {

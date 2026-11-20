@@ -274,7 +274,7 @@ export default function Console() {
   const completed = new Set(execution?.approved || []);
   for (const current of currentRuns) if (current.status === 'succeeded' && current.step_id) completed.add(current.step_id);
   const canContinue = execution?.status === 'failed' && currentRuns.some(current => ['rejected', 'failed', 'lost', 'canceled'].includes(current.status));
-  const resumeQA = canContinue && currentRuns.some(current => current.status === 'rejected') && Object.keys(execution?.qa_reviews || {}).length > 0;
+  const resumeQA = canContinue && Object.values(execution?.qa_reviews || {}).some(review => review.phase !== 'rechecking');
   const deliveryFinished = execution?.status === 'succeeded' && execution.workflow?.steps.some(step => step.executor === 'notify' && completed.has(step.id));
   const exportRun = currentRuns.find(item => item.status === 'succeeded' && item.result?.artifacts?.some(artifact => artifact.name === 'godot-web.zip'));
   const qaRuns = (execution?.workflow?.steps || []).filter(step => step.qa_gate).map(step => attemptsByStep.get(step.id)?.[0]);
@@ -488,7 +488,7 @@ export default function Console() {
             executions.length === 0 ? <p role="status">该项目暂无运行记录。</p> :
               <label>工作流运行<select value={executionID} onChange={event => { setExecutionID(event.target.value); selectRun(''); }}>{executions.map(item => <option key={item.id} value={item.id}>{item.workflow_id} v{item.version} · {label[item.qa_phase || item.status] || item.status} · {item.id.slice(0, 7)}</option>)}</select></label>}
           {canContinue && execution && <div className="notice line">
-            <p>{resumeQA ? '已有 QA 缺陷单，可从本次验收继续处理。' : '问题修复后可以继续。已通过的步骤和产出会保留。'}</p>
+            <p>{resumeQA ? '已有当前构建的 QA 缺陷单，可以继续返工。' : '问题修复后可以继续。已通过的步骤和产出会保留。'}</p>
             <button className="primary" disabled={busy} onClick={() => void action(async () => {
               const resumed = await api<Execution>(token, `/executions/${execution.id}/continue`, {});
               setHistory(current => current?.detail?.id === resumed.id && current.project === resumed.project ? {
@@ -507,16 +507,18 @@ export default function Console() {
           </div>}
           {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{execution.workflow.steps.map(step => {
             const [current, ...history] = attemptsByStep.get(step.id) || [];
+            const review = ['running', 'waiting_qa'].includes(execution.status) ? execution.qa_reviews?.[step.id] : undefined;
+            const reviewed = review ? [current, ...history].find(attempt => attempt?.id === review.run_id) : current;
             const repairs = [':triage', ':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
             return <li key={step.id} data-tone={tone(runStatus(status, current?.result?.detail))}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
               {history.length > 0 && <details><summary>历史尝试</summary><div className="actions">{history.map(previous => <button key={previous.id} onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
-              {execution.qa_tickets?.[step.id]?.length ? <QAReview key={current?.id} tickets={execution.qa_tickets[step.id]}
-                review={['running', 'waiting_qa'].includes(execution.status) ? execution.qa_reviews?.[step.id] : undefined}
-                bugs={current?.result?.bugs || []} busy={busy} decide={body => void action(async () => {
-                  await api(token, `/executions/${execution.id}/qa/${current.id}`, body);
+              {execution.qa_tickets?.[step.id]?.length ? <QAReview key={reviewed?.id} tickets={execution.qa_tickets[step.id]}
+                review={review} bugs={reviewed?.result?.bugs || []} busy={busy} decide={body => void action(async () => {
+                  if (!review) return;
+                  await api(token, `/executions/${execution.id}/qa/${review.run_id}`, body);
                   const detail = await api<Execution>(token, '/executions/' + execution.id);
                   setHistory(h => h?.detail?.id === detail.id ? { ...h, detail, executions: h.executions.map(item => item.id === detail.id ? detail : item) } : h);
                 })} /> : null}

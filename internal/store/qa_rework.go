@@ -56,17 +56,53 @@ func accountableBugs(bugs []protocol.Bug) []protocol.Bug {
 	return work
 }
 
+func rejectedQA(run protocol.Run) bool {
+	return run.Status == "rejected" && run.Result != nil && protocol.ValidBugs(run.Result.Bugs)
+}
+
+// A retry of the same build can be interrupted even though QA already
+// recorded a usable rejection. Keep the report selected on manual continuation
+// until a fresh QA attempt replaces that interrupted attempt.
+func qaReport(e protocol.Execution, latest, ci protocol.Run, manual bool) protocol.Run {
+	if !interrupted(latest.Status) || rejectedQA(latest) {
+		return latest
+	}
+	var report protocol.Run
+	for _, run := range e.Runs {
+		if run.StepID == latest.StepID && run.Attempt < latest.Attempt &&
+			run.Attempt > report.Attempt && run.Spec.Commit == latest.Spec.Commit && rejectedQA(run) {
+			report = run
+		}
+	}
+	if report.ID == "" {
+		return latest
+	}
+	d := e.Decisions[report.ID]
+	if d.ResumeAfter == latest.ID {
+		return report
+	}
+	// A rebuilt revision or an explicitly requested recheck should resume
+	// verification on that revision.
+	if manual && ci.Spec.RecheckOf != report.ID && !d.Recheck && !d.EnvironmentReady {
+		return report
+	}
+	return latest
+}
+
 // The scheduler, operator actions and console all use the same decision for a
 // specific QA attempt. Only the scheduler creates jobs, under the execution lock.
 func planQA(e protocol.Execution, step protocol.Step, runs map[string]protocol.Run, manual bool) qaPlan {
-	qa := runs[step.ID]
 	p := qaPlan{}
-	if !step.QARework || qa.Status != "rejected" || qa.Result == nil || !protocol.ValidBugs(qa.Result.Bugs) {
+	if !step.QARework {
+		return p
+	}
+	ciStep := workflowStep(e.Workflow, step.BaseFrom)
+	ci := runs[ciStep.ID]
+	qa := qaReport(e, runs[step.ID], ci, manual)
+	if !rejectedQA(qa) {
 		return p
 	}
 	p.RunID = qa.ID
-	ciStep := workflowStep(e.Workflow, step.BaseFrom)
-	ci := runs[ciStep.ID]
 	rebuilt := ci.Spec.RecheckOf == qa.ID
 	if rebuilt && ci.Status != "succeeded" {
 		return p.state("rework", "等待 CI 构建与测试")
@@ -235,17 +271,27 @@ func handleStepFailure(ctx context.Context, tx pgx.Tx, e protocol.Execution, ste
 		return handleCIFailure(ctx, tx, e, step, runs, manual)
 	}
 	p := planQA(e, step, runs, manual)
-	if p.stepID == "" {
-		return p.Phase != "", nil
+	if p.Phase == "" {
+		return false, nil
+	}
+	d := e.Decisions[p.RunID]
+	resuming := manual && p.RunID != runs[step.ID].ID && d.ResumeAfter != runs[step.ID].ID
+	if resuming {
+		d.ResumeAfter = runs[step.ID].ID
 	}
 	// Freeze the approved routing with the first repair, for subsequent roles
 	// and for the ticket history after this QA attempt has ended.
-	if len(p.Assignments) != 0 && len(e.Decisions[p.RunID].Assignments) == 0 && strings.HasPrefix(p.stepID, step.ID+":fix:") {
-		d := e.Decisions[p.RunID]
+	newAssignments := len(p.Assignments) != 0 && len(d.Assignments) == 0 && strings.HasPrefix(p.stepID, step.ID+":fix:")
+	if newAssignments {
 		d.Assignments = p.Assignments
+	}
+	if resuming || newAssignments {
 		if _, err := tx.Exec(ctx, `UPDATE executions SET qa_decisions=jsonb_set(qa_decisions,ARRAY[$2::text],$3) WHERE id=$1`, e.ID, p.RunID, d); err != nil {
 			return false, err
 		}
+	}
+	if p.stepID == "" {
+		return true, nil
 	}
 	if p.build.ID != "" {
 		if err := appendBuildEvidence(ctx, tx, &p.spec, p.build); err != nil {

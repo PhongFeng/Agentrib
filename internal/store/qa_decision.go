@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/PhongFeng/Agentrib/internal/protocol"
@@ -25,7 +26,6 @@ func (s *Store) DecideQA(ctx context.Context, id, runID, action string, input pr
 	if err != nil {
 		return err
 	}
-	_, latest := outcomes(e)
 	for step, review := range e.Reviews {
 		if review.RunID != runID || !waitingForQA(review.Phase) {
 			continue
@@ -33,7 +33,9 @@ func (s *Store) DecideQA(ctx context.Context, id, runID, action string, input pr
 		d := e.Decisions[runID]
 		switch action {
 		case "assign":
-			if review.Phase != "product_review" || !protocol.ValidAssignments(input.Assignments, accountableBugs(latest[step].Result.Bugs), review.Roles) {
+			report := slices.IndexFunc(e.Runs, func(run protocol.Run) bool { return run.ID == runID && run.StepID == step })
+			if review.Phase != "product_review" || report < 0 || !rejectedQA(e.Runs[report]) ||
+				!protocol.ValidAssignments(input.Assignments, accountableBugs(e.Runs[report].Result.Bugs), review.Roles) {
 				return ErrConflict
 			}
 			dispatch, err := newID()

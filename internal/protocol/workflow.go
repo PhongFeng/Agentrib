@@ -77,6 +77,7 @@ type Assignment struct {
 }
 
 type QADecision struct {
+	ResumeAfter      string                `json:"resume_after,omitempty"`
 	Dispatch         string                `json:"dispatch,omitempty"`
 	Recheck          bool                  `json:"recheck,omitempty"`
 	Assignments      map[string]Assignment `json:"assignments,omitempty"`
