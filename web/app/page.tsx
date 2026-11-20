@@ -280,6 +280,7 @@ export default function Console() {
   const qaRuns = (execution?.workflow?.steps || []).filter(step => step.qa_gate).map(step => attemptsByStep.get(step.id)?.[0]);
   const qaRun = qaRuns.find(item => item?.status === 'succeeded');
   const delivered = deliveryFinished && qaRuns.length > 0 && qaRuns.every(item => item?.status === 'succeeded');
+  const deferredTickets = Object.values(execution?.qa_tickets || {}).flat().filter(ticket => ticket.deferred_reason).length;
 
   return <>
     <header><div className="frame header"><a className="brand" href="/"><BrandMark height={20} /><span className="brand-name">Agent<span>rib</span></span></a><span className="header-sub">游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
@@ -499,7 +500,9 @@ export default function Console() {
             })}>{resumeQA ? '恢复 QA 返工' : '从失败处继续'}</button>
           </div>}
           {deliveryFinished && <div className="notice">
-            <p role="status">{delivered ? 'QA 已通过，可以交付。' : '工作流已结束，未记录 QA 通过。'}</p>
+            <p role="status">{delivered
+              ? deferredTickets > 0 ? `本轮验收范围已通过，${deferredTickets} 张缺陷单延期验证。` : 'QA 已通过，可以交付。'
+              : '工作流已结束，未记录 QA 通过。'}</p>
             {(qaRun || exportRun) && <div className="actions">
               {qaRun && <button onClick={() => { if (qaRun.id !== runID) selectRun(qaRun.id); }}>查看 QA 报告</button>}
               {exportRun && <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, 'godot-web.zip'))}>下载试玩包</button>}

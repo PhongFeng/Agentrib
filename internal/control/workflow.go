@@ -179,6 +179,7 @@ func (a *API) decideQA(w http.ResponseWriter, r *http.Request) {
 		Action      string                         `json:"action"`
 		Assignments map[string]protocol.Assignment `json:"assignments,omitempty"`
 		Note        string                         `json:"note,omitempty"`
+		TicketID    string                         `json:"ticket_id,omitempty"`
 	}
 	if !read(w, r, &input) {
 		return
@@ -187,9 +188,13 @@ func (a *API) decideQA(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "产品说明过长或包含无效字符")
 		return
 	}
-	err := a.store.DecideQA(r.Context(), r.PathValue("id"), r.PathValue("run"), input.Action, protocol.QADecision{Assignments: input.Assignments, Note: input.Note})
+	decision := protocol.QADecision{Assignments: input.Assignments, Note: input.Note}
+	if input.Action == "defer_ticket" {
+		decision.Deferred = map[string]string{input.TicketID: strings.TrimSpace(input.Note)}
+	}
+	err := a.store.DecideQA(r.Context(), r.PathValue("id"), r.PathValue("run"), input.Action, decision)
 	if errors.Is(err, store.ErrConflict) {
-		problem(w, http.StatusConflict, "缺陷状态已变化或分派无效，请刷新并确认当前分工")
+		problem(w, http.StatusConflict, "缺陷状态已变化或操作无效，请刷新后重试")
 		return
 	}
 	response(w, http.StatusOK, map[string]string{"status": "accepted"}, err)

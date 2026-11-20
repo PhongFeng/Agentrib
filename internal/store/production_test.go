@@ -280,7 +280,7 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 }
 
 func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
-	for _, scenario := range []string{"direct", "mixed_environment", "product_agent", "product_operator", "round_limit", "no_changes", "legacy_environment", "interrupted_rework", "interrupted_triage"} {
+	for _, scenario := range []string{"direct", "mixed_environment", "product_agent", "product_operator", "round_limit", "no_changes", "legacy_environment", "interrupted_rework", "interrupted_triage", "deferred_environment"} {
 		t.Run(scenario, func(t *testing.T) { testQARework(t, scenario) })
 	}
 }
@@ -345,7 +345,8 @@ func testQARework(t *testing.T, scenario string) {
 	ticketID := "QA-" + qa.ID[:7] + "-1"
 	var findings []protocol.Bug
 	operatorTriage := scenario == "product_operator" || scenario == "interrupted_triage"
-	mixedEnvironment := scenario == "mixed_environment" || scenario == "interrupted_rework"
+	mixedEnvironment := scenario == "mixed_environment" || scenario == "interrupted_rework" || scenario == "deferred_environment"
+	deferredID := "QA-" + qa.ID[:7] + "-3"
 	if scenario == "product_agent" || operatorTriage {
 		bug.Owner = "producer"
 	}
@@ -353,6 +354,10 @@ func testQARework(t *testing.T, scenario string) {
 	if mixedEnvironment {
 		env := protocol.Bug{Owner: "environment", Title: "Browser unavailable", Steps: "Open game", Expected: "Browser launches", Actual: "Missing tool"}
 		findings = append(findings, env)
+		if scenario == "deferred_environment" {
+			env.Title, env.Expected = "Mobile device unavailable", "Playable on mobile"
+			findings = append(findings, env)
+		}
 	}
 	if scenario == "legacy_environment" {
 		bug.Owner = "environment"
@@ -473,6 +478,19 @@ func testQARework(t *testing.T, scenario string) {
 		if job, err := db.Claim(ctx, mid); err != nil || job != nil {
 			t.Fatalf("unexpected pending work: %+v %v", job, err)
 		}
+		if scenario == "deferred_environment" {
+			if err := db.DecideQA(ctx, eid, qa.ID, "defer_ticket", protocol.QADecision{Deferred: map[string]string{ticketID: "skip audio"}}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("accepted deferral of a product defect: %v", err)
+			}
+			if err := db.DecideQA(ctx, eid, qa.ID, "defer_ticket", protocol.QADecision{Deferred: map[string]string{deferredID: "Mobile verification at release"}}); err != nil {
+				t.Fatal(err)
+			}
+			tick()
+			e, err = db.Execution(ctx, eid)
+			if err != nil || e.Status != "waiting_qa" || len(e.Reviews["qa"].EnvironmentTickets) != 1 || slices.Contains(e.Reviews["qa"].EnvironmentTickets, deferredID) {
+				t.Fatalf("deferral affected a different blocker: %+v %v", e, err)
+			}
+		}
 		if err := db.DecideQA(ctx, eid, qa.ID, "environment_ready", protocol.QADecision{}); err != nil {
 			t.Fatal(err)
 		}
@@ -494,6 +512,9 @@ func testQARework(t *testing.T, scenario string) {
 	}
 	if !strings.Contains(review.Spec.Prompt, ticketID) {
 		t.Fatal("lost the ticket ID before recheck")
+	}
+	if scenario == "deferred_environment" && !strings.Contains(review.Spec.Prompt, "Mobile verification at release") {
+		t.Fatal("QA did not receive the deferral")
 	}
 	if e, err := db.Execution(ctx, eid); err != nil || e.Status != "running" || len(e.Approved) != 0 {
 		t.Fatalf("released before QA passed: %+v %v", e, err)
@@ -526,6 +547,12 @@ func testQARework(t *testing.T, scenario string) {
 		t.Fatalf("release did not follow recheck: %+v %v", e, err)
 	} else {
 		for _, ticket := range e.Tickets["qa"] {
+			if scenario == "deferred_environment" && ticket.ID == deferredID {
+				if ticket.Closed || ticket.DeferredReason != "Mobile verification at release" {
+					t.Fatalf("deferral was lost or counted as verified: %+v", ticket)
+				}
+				continue
+			}
 			if scenario == "product_agent" || operatorTriage {
 				if ticket.Owner != "develop" || !slices.Contains(ticket.Helpers, "audio") {
 					t.Fatalf("lost assigned roles: %+v", ticket)
