@@ -23,6 +23,7 @@ type Step struct {
 }
 
 type Bug struct {
+	ID       string `json:"id,omitempty"`
 	Owner    string `json:"owner"`
 	Title    string `json:"title"`
 	Steps    string `json:"steps"`
@@ -36,11 +37,11 @@ func ValidBugs(bugs []Bug) bool {
 	}
 	for _, bug := range bugs {
 		switch bug.Owner {
-		case "art", "audio", "develop", "environment":
+		case "art", "audio", "develop", "environment", "producer":
 		default:
 			return false
 		}
-		if len(bug.Title) > 240 {
+		if (bug.ID != "" && !ticketID.MatchString(bug.ID)) || len(bug.Title) > 240 {
 			return false
 		}
 		for _, field := range []string{bug.Title, bug.Steps, bug.Expected, bug.Actual} {
@@ -70,7 +71,32 @@ type ExecutionInput struct {
 	Commit     string `json:"commit,omitempty"`
 }
 
+type Assignment struct {
+	Owner   string   `json:"owner"`
+	Helpers []string `json:"helpers,omitempty"`
+}
+
+type QADecision struct {
+	Dispatch         string                `json:"dispatch,omitempty"`
+	Recheck          bool                  `json:"recheck,omitempty"`
+	Assignments      map[string]Assignment `json:"assignments,omitempty"`
+	Note             string                `json:"note,omitempty"`
+	EnvironmentReady bool                  `json:"environment_ready,omitempty"`
+}
+
+type QAReview struct {
+	Assignments map[string]Assignment `json:"assignments,omitempty"`
+	RunID       string                `json:"run_id"`
+	Phase       string                `json:"phase"`
+	Reason      string                `json:"reason"`
+	Roles       []string              `json:"roles,omitempty"`
+}
+
 type Execution struct {
+	QAPhase   string                `json:"qa_phase,omitempty"`
+	Decisions map[string]QADecision `json:"qa_decisions,omitempty"`
+	Reviews   map[string]QAReview   `json:"qa_reviews,omitempty"`
+	Tickets   map[string][]Ticket   `json:"qa_tickets,omitempty"`
 	ExecutionInput
 	Status   string    `json:"status"`
 	Created  time.Time `json:"created"`

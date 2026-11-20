@@ -59,6 +59,7 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("GET /api/v1/executions", a.asOperator(a.executions))
 	mux.HandleFunc("POST /api/v1/executions", a.asOperator(a.startExecution))
 	mux.HandleFunc("GET /api/v1/executions/{id}", a.asOperator(a.execution))
+	mux.HandleFunc("POST /api/v1/executions/{id}/qa/{run}", a.asOperator(a.decideQA))
 	mux.HandleFunc("POST /api/v1/executions/{id}/continue", a.asOperator(a.continueExecution))
 	mux.HandleFunc("POST /api/v1/executions/{id}/approve/{step}", a.asOperator(a.approve))
 	mux.HandleFunc("POST /api/v1/runner/heartbeat", a.asRunner(a.heartbeat))
@@ -201,7 +202,7 @@ func validSpec(spec protocol.Spec) bool {
 	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
 	agent, usesAgent := protocol.FindAgent(spec.Executor)
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
-		spec.BriefMode == "" && spec.RepairOf == "" && spec.RecheckOf == "" && !spec.Preflight && !spec.QARework &&
+		spec.BriefMode == "" && spec.RepairOf == "" && spec.QADispatch == "" && spec.RecheckOf == "" && !spec.Preflight && !spec.QARework &&
 		len(spec.MergeCommits) == 0 && !spec.QAGate && !spec.ExportGame &&
 		known && engine.Implemented && (usesAgent || spec.Executor == engine.ID) &&
 		(!spec.ReadOnly || agent.ReadOnly) &&
@@ -360,6 +361,9 @@ func validResult(result *protocol.Result) bool {
 		return false
 	}
 	if result.Reply != "" && (result.Status != "succeeded" || !validText(result.Reply, protocol.MaxBriefBytes)) {
+		return false
+	}
+	if len(result.Verified) > 0 && len(result.Bugs) == 0 || !protocol.ValidVerified(result.Verified, result.Bugs) {
 		return false
 	}
 	if len(result.Bugs) > 0 && (result.Status != "failed" || !protocol.ValidBugs(result.Bugs)) {

@@ -284,10 +284,16 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 		err = errors.Join(err, r.uploadArtifacts(worker, job, &result))
 		switch {
 		case errors.Is(worker.Err(), context.Canceled):
+			result.Bugs, result.Verified = nil, nil
 			result.Status, result.Detail = "canceled", "Process stopped"
 		case errors.Is(worker.Err(), context.DeadlineExceeded):
+			result.Bugs, result.Verified = nil, nil
 			result.Status, result.Detail = "failed", "Execution timed out"
 			logs.add("error", fmt.Sprintf("Execution timed out after %s", duration))
+		case errors.Is(err, errQARejected):
+			// Older control planes expect a failed transport result for QA tickets.
+			result.Status, result.Detail = "failed", errQARejected.Error()
+			logs.add("qa", result.Detail)
 		case err != nil:
 			result.Status, result.Detail = "failed", "Execution failed; see events"
 			logs.add("error", err.Error())

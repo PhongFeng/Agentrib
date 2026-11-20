@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { api, newID } from './api';
+import { QAReview, qaRoles, type Bug, type Ticket, type Review } from './qa-review';
 import { BriefChat, clearBriefChats } from './brief-chat';
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
@@ -14,15 +15,14 @@ type Agent = { id: string; name: string; commands: string[]; read_only: boolean 
 type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string; merge_from?: string[]; qa_gate?: boolean; export_game?: boolean; ci_repair_agent?: string; preflight?: boolean; qa_rework?: boolean };
 type Workflow = { id: string; version: number; name: string; engine?: string; steps: Step[] };
 type Artifact = { name: string; sha256: string; bytes: number };
-type Bug = { owner: 'art' | 'audio' | 'develop' | 'environment'; title: string; steps: string; expected: string; actual: string };
 type Run = { id: string; step_id?: string; attempt?: number; status: string; spec: { title: string; executor: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[]; bugs?: Bug[] } };
-type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[] };
+type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[]; qa_phase?: string; qa_reviews?: Record<string, Review>; qa_tickets?: Record<string, Ticket[]> };
 type RunEvent = { seq: number; kind: string; text: string };
 type View = 'workbench' | 'history';
 type History = { project: string; executions: Execution[]; detail?: Execution };
 
 const executors: Record<string, string> = { approval: '人工确认', engine: '引擎测试与导出', notify: '站内交付通知' };
-const label: Record<string, string> = { queued: '排队', claimed: '已领取', running: '运行中', canceling: '取消中', failed: '失败', lost: '失联', canceled: '已取消', succeeded: '已通过', waiting: '等待依赖', ready: '等待确认' };
+const label: Record<string, string> = { rework: '返工中', product_review: '待产品介入', environment: '待环境恢复', triaging: '产品分诊中', rechecking: 'QA 复验中', waiting_qa: '待处理', rejected: '本轮验收未通过', queued: '排队', claimed: '已领取', running: '运行中', canceling: '取消中', failed: '失败', lost: '失联', canceled: '已取消', succeeded: '已通过', waiting: '等待依赖', ready: '等待确认' };
 const projectStatus: Record<Project['status'], string> = { ready: '工作区就绪', pending: '等待创建工作区', failed: '工作区创建失败', unavailable: '工作区暂不可用' };
 const emptyProject: ProjectInput = { id: '', name: '', engine: 'godot' };
 const agentAccountLabel: Record<string, string> = { available: '额度可用', limited: '额度受限', signed_in: '已登录', auth_required: '需要认证' };
@@ -35,7 +35,7 @@ function runStatus(status: string, detail?: string) {
 }
 
 const goodTones = new Set(['在线', 'CLI 已就绪', '额度可用', '已登录', '工作区就绪', '已通过', '已通知']);
-const warnTones = new Set(['额度受限', '需要认证', '等待确认', '等待依赖', '排队', '已领取', '等待创建工作区', 'CLI 未就绪']);
+const warnTones = new Set(['本轮验收未通过', '额度受限', '需要认证', '等待确认', '等待依赖', '排队', '已领取', '等待创建工作区', 'CLI 未就绪']);
 const badTones = new Set(['离线', '失败', '失联', '执行超时', '工作区创建失败', '工作区暂不可用']);
 const infoTones = new Set(['运行中', '取消中']);
 function tone(text: string) {
@@ -273,7 +273,8 @@ export default function Console() {
   const currentRuns = Array.from(attemptsByStep.values(), attempts => attempts[0]);
   const completed = new Set(execution?.approved || []);
   for (const current of currentRuns) if (current.status === 'succeeded' && current.step_id) completed.add(current.step_id);
-  const canContinue = execution?.status === 'failed' && currentRuns.some(current => ['failed', 'lost', 'canceled'].includes(current.status));
+  const canContinue = execution?.status === 'failed' && currentRuns.some(current => ['rejected', 'failed', 'lost', 'canceled'].includes(current.status));
+  const resumeQA = canContinue && currentRuns.some(current => current.status === 'rejected') && Object.keys(execution?.qa_reviews || {}).length > 0;
   const deliveryFinished = execution?.status === 'succeeded' && execution.workflow?.steps.some(step => step.executor === 'notify' && completed.has(step.id));
   const exportRun = currentRuns.find(item => item.status === 'succeeded' && item.result?.artifacts?.some(artifact => artifact.name === 'godot-web.zip'));
   const qaRuns = (execution?.workflow?.steps || []).filter(step => step.qa_gate).map(step => attemptsByStep.get(step.id)?.[0]);
@@ -485,9 +486,9 @@ export default function Console() {
           {!historyProject ? <p>选择游戏项目后查看该项目的运行状态和日志。</p> :
             !executions ? <p role="status">正在加载该项目的运行记录…</p> :
             executions.length === 0 ? <p role="status">该项目暂无运行记录。</p> :
-              <label>工作流运行<select value={executionID} onChange={event => { setExecutionID(event.target.value); selectRun(''); }}>{executions.map(item => <option key={item.id} value={item.id}>{item.workflow_id} v{item.version} · {label[item.status] || item.status} · {item.id.slice(0, 7)}</option>)}</select></label>}
+              <label>工作流运行<select value={executionID} onChange={event => { setExecutionID(event.target.value); selectRun(''); }}>{executions.map(item => <option key={item.id} value={item.id}>{item.workflow_id} v{item.version} · {label[item.qa_phase || item.status] || item.status} · {item.id.slice(0, 7)}</option>)}</select></label>}
           {canContinue && execution && <div className="notice line">
-            <p>问题修复后可以继续。已通过的步骤和产出会保留。</p>
+            <p>{resumeQA ? '已有 QA 缺陷单，可从本次验收继续处理。' : '问题修复后可以继续。已通过的步骤和产出会保留。'}</p>
             <button className="primary" disabled={busy} onClick={() => void action(async () => {
               const resumed = await api<Execution>(token, `/executions/${execution.id}/continue`, {});
               setHistory(current => current?.detail?.id === resumed.id && current.project === resumed.project ? {
@@ -495,7 +496,7 @@ export default function Console() {
                 detail: resumed,
                 executions: current.executions.map(item => item.id === resumed.id ? { ...item, status: resumed.status } : item),
               } : current);
-            })}>从失败处继续</button>
+            })}>{resumeQA ? '恢复 QA 返工' : '从失败处继续'}</button>
           </div>}
           {deliveryFinished && <div className="notice">
             <p role="status">{delivered ? 'QA 已通过，可以交付。' : '工作流已结束，未记录 QA 通过。'}</p>
@@ -506,12 +507,19 @@ export default function Console() {
           </div>}
           {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{execution.workflow.steps.map(step => {
             const [current, ...history] = attemptsByStep.get(step.id) || [];
-            const repairs = [':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
+            const repairs = [':triage', ':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
             return <li key={step.id} data-tone={tone(runStatus(status, current?.result?.detail))}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
               {history.length > 0 && <details><summary>历史尝试</summary><div className="actions">{history.map(previous => <button key={previous.id} onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
+              {execution.qa_tickets?.[step.id]?.length ? <QAReview key={current?.id} tickets={execution.qa_tickets[step.id]}
+                review={['running', 'waiting_qa'].includes(execution.status) ? execution.qa_reviews?.[step.id] : undefined}
+                bugs={current?.result?.bugs || []} busy={busy} decide={body => void action(async () => {
+                  await api(token, `/executions/${execution.id}/qa/${current.id}`, body);
+                  const detail = await api<Execution>(token, '/executions/' + execution.id);
+                  setHistory(h => h?.detail?.id === detail.id ? { ...h, detail, executions: h.executions.map(item => item.id === detail.id ? detail : item) } : h);
+                })} /> : null}
               {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="actions">{repairs.map(repair => <button key={repair.id} onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>)}</div></details>}
             </div><div className="actions">
               {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
@@ -520,8 +528,8 @@ export default function Console() {
           })}</ol></>}
           {run && <article className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
             {run.result && <p>{run.result.detail === 'Execution timed out' ? '执行超时' : run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
-            {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>QA-{run.id.slice(0, 7)}-{i + 1} · {bug.title}</strong>
-              <p>负责角色　{{ art: '美术 Agent', audio: '音效 Agent', develop: '开发 Agent', environment: '执行环境' }[bug.owner] || bug.owner}</p>
+            {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>{execution?.runs?.find(r => r.id === run.id)?.result?.bugs?.[i]?.id || bug.id || `QA-${run.id.slice(0, 7)}-${i + 1}`} · {bug.title}</strong>
+              <p>负责角色　{qaRoles[bug.owner] || bug.owner}</p>
               <p>复现　{bug.steps}</p><p>预期　{bug.expected}</p><p>实际　{bug.actual}</p>
             </li>)}</ol></section>}
             {run.result?.artifacts?.length ? <ul>{run.result.artifacts.map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul> : null}

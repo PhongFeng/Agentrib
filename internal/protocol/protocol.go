@@ -47,6 +47,7 @@ type Spec struct {
 	MergeCommits []string `json:"merge_commits,omitempty"`
 	QAGate       bool     `json:"qa_gate,omitempty"`
 	ExportGame   bool     `json:"export_game,omitempty"`
+	QADispatch   string   `json:"qa_dispatch,omitempty"`
 	RepairOf     string   `json:"repair_of,omitempty"`
 	Preflight    bool     `json:"preflight,omitempty"`
 	QARework     bool     `json:"qa_rework,omitempty"`
@@ -84,6 +85,7 @@ type Result struct {
 	Commit    string     `json:"commit,omitempty"`
 	Artifacts []Artifact `json:"artifacts,omitempty"`
 	Reply     string     `json:"reply,omitempty"`
+	Verified  []string   `json:"verified,omitempty"`
 	Bugs      []Bug      `json:"bugs,omitempty"`
 }
 

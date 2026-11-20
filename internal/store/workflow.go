@@ -18,7 +18,7 @@ import (
 //go:embed workflow.sql
 var workflowSchema string
 
-const executionColumns = "id, workflow_id,version,machine_id,project,brief,commit_sha,status,created"
+const executionColumns = "id, workflow_id,version,machine_id,project,brief,commit_sha,status,created,qa_phase,qa_decisions"
 const workflowColumns = "id,version,name,steps,engine"
 
 var ErrEngineUnavailable = errors.New("Selected game engine has no available adapter on this Runner")
@@ -85,7 +85,7 @@ func (s *Store) Workflows(ctx context.Context) ([]protocol.Workflow, error) {
 
 func scanExecution(row pgx.Row) (protocol.Execution, error) {
 	var e protocol.Execution
-	err := row.Scan(&e.ID, &e.WorkflowID, &e.Version, &e.MachineID, &e.Project, &e.Brief, &e.Commit, &e.Status, &e.Created)
+	err := row.Scan(&e.ID, &e.WorkflowID, &e.Version, &e.MachineID, &e.Project, &e.Brief, &e.Commit, &e.Status, &e.Created, &e.QAPhase, &e.Decisions)
 	return e, err
 }
 
@@ -195,7 +195,29 @@ func hydrate(ctx context.Context, db queryer, e protocol.Execution) (protocol.Ex
 		}
 		e.Approved = append(e.Approved, id)
 	}
-	return e, rows.Err()
+	if err := rows.Err(); err != nil {
+		return e, err
+	}
+	_, latest := outcomes(e)
+	e.Reviews = make(map[string]protocol.QAReview)
+	e.Tickets = make(map[string][]protocol.Ticket)
+	for _, step := range e.Workflow.Steps {
+		if !step.QARework {
+			continue
+		}
+		tickets := protocol.TrackTickets(e.Runs, step.ID, e.Decisions)
+		if len(tickets) == 0 {
+			continue
+		}
+		e.Tickets[step.ID] = tickets
+		p := planQA(e, step, latest, false)
+		if p.Phase != "" {
+			e.Reviews[step.ID] = p.QAReview
+		} else if r := latest[step.ID]; pending(r) {
+			e.Reviews[step.ID] = protocol.QAReview{RunID: r.ID, Phase: "rechecking", Reason: "QA 正在复验当前构建"}
+		}
+	}
+	return e, nil
 }
 
 func outcomes(e protocol.Execution) (map[string]bool, map[string]protocol.Run) {
@@ -215,7 +237,7 @@ func outcomes(e protocol.Execution) (map[string]bool, map[string]protocol.Run) {
 }
 
 func interrupted(status string) bool {
-	return status == "failed" || status == "lost" || status == "canceled"
+	return status == "rejected" || status == "failed" || status == "lost" || status == "canceled"
 }
 
 // ContinueExecution opens new attempts on the same workflow and Git inputs.
@@ -379,7 +401,7 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		if failed {
 			status = "failed"
 		}
-		if _, err := tx.Exec(ctx, `UPDATE executions SET status=$2 WHERE id=$1`, e.ID, status); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE executions SET status=$2,qa_phase='' WHERE id=$1`, e.ID, status); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -407,7 +429,7 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 			for i, source := range append([]string{step.BaseFrom}, step.MergeFrom...) {
 				predecessor := runs[source].Result
 				if predecessor == nil || predecessor.Commit == "" {
-					if _, err := tx.Exec(ctx, `UPDATE executions SET status='failed' WHERE id=$1`, e.ID); err != nil {
+					if _, err := tx.Exec(ctx, `UPDATE executions SET status='failed',qa_phase='' WHERE id=$1`, e.ID); err != nil {
 						return err
 					}
 					return tx.Commit(ctx)
@@ -428,6 +450,34 @@ func (s *Store) scheduleExecution(ctx context.Context, id string) error {
 		}
 		digest := sha256.Sum256([]byte(e.ID + "/" + step.ID))
 		if _, err := insertRun(ctx, tx, hex.EncodeToString(digest[:16]), spec, e.ID, step.ID, 1); err != nil {
+			return err
+		}
+	}
+	// Sleep only when this execution has no work besides an operator decision.
+	phase := ""
+	wait := false
+	otherWork := false
+	for _, step := range e.Workflow.Steps {
+		if review, ok := e.Reviews[step.ID]; ok {
+			if waitingForQA(review.Phase) {
+				wait = true
+				phase = review.Phase
+			} else {
+				otherWork = true
+				if !wait {
+					phase = review.Phase
+				}
+			}
+		} else if !done[step.ID] && ready(step, done) && (step.Executor != "notify" || reviewComplete) {
+			otherWork = true
+		}
+	}
+	status := "running"
+	if wait && !otherWork {
+		status = "waiting_qa"
+	}
+	if phase != e.QAPhase || status != e.Status {
+		if _, err := tx.Exec(ctx, `UPDATE executions SET status=$2,qa_phase=$3 WHERE id=$1`, e.ID, status, phase); err != nil {
 			return err
 		}
 	}

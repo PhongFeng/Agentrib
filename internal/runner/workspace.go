@@ -158,6 +158,15 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		}
 	}
 	var finalReply string
+	if run.IsProductTriage() {
+		answer, err := r.finalAgentReply(ctx, backend, dir, run.Spec.Prompt, run.Spec.ReadOnly, emit)
+		if err != nil {
+			return result, err
+		}
+		// Only the routing decision leaves this disposable checkout.
+		result.Reply = answer
+		return result, nil
+	}
 	if brief {
 		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, true, emit)
 	} else {
