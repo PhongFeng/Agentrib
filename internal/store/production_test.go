@@ -280,7 +280,7 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 }
 
 func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
-	for _, scenario := range []string{"direct", "mixed_environment", "product_agent", "product_operator", "round_limit", "no_changes", "legacy_environment"} {
+	for _, scenario := range []string{"direct", "mixed_environment", "product_agent", "product_operator", "round_limit", "no_changes", "legacy_environment", "interrupted_rework", "interrupted_triage"} {
 		t.Run(scenario, func(t *testing.T) { testQARework(t, scenario) })
 	}
 }
@@ -344,11 +344,13 @@ func testQARework(t *testing.T, scenario string) {
 	bug := protocol.Bug{Owner: "audio", Title: "Music missing", Steps: "Enter a level", Expected: "Music loops", Actual: "Silence"}
 	ticketID := "QA-" + qa.ID[:7] + "-1"
 	var findings []protocol.Bug
-	if scenario == "product_agent" || scenario == "product_operator" {
+	operatorTriage := scenario == "product_operator" || scenario == "interrupted_triage"
+	mixedEnvironment := scenario == "mixed_environment" || scenario == "interrupted_rework"
+	if scenario == "product_agent" || operatorTriage {
 		bug.Owner = "producer"
 	}
 	findings = append(findings, bug)
-	if scenario == "mixed_environment" {
+	if mixedEnvironment {
 		env := protocol.Bug{Owner: "environment", Title: "Browser unavailable", Steps: "Open game", Expected: "Browser launches", Actual: "Missing tool"}
 		findings = append(findings, env)
 	}
@@ -383,17 +385,35 @@ func testQARework(t *testing.T, scenario string) {
 		return
 	}
 	report(qa, "failed", build, findings...)
-	if scenario == "product_agent" || scenario == "product_operator" {
+	if scenario == "interrupted_rework" || scenario == "interrupted_triage" {
+		// Preserve the historical rejection while simulating an older release
+		// which repeated QA on the same revision and then lost its lease.
+		if _, err := insertRun(ctx, db.db, strings.Repeat("2", 32), qa.Spec, eid, "qa", 2); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.db.Exec(ctx, `UPDATE runs SET status='lost' WHERE execution_id=$1 AND step_id='qa' AND attempt=2`, eid); err != nil {
+			t.Fatal(err)
+		}
+		tick()
+		e, err := db.Execution(ctx, eid)
+		if err != nil || e.Status != "failed" || e.Reviews["qa"].RunID != qa.ID {
+			t.Fatalf("missing original rejection on continuation: %+v %v", e, err)
+		}
+		if _, err := db.ContinueExecution(ctx, eid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if scenario == "product_agent" || operatorTriage {
 		triage := claim("qa:triage", build, "codex")
 		plan := map[string]protocol.Assignment{ticketID: {Owner: "develop", Helpers: []string{"audio"}}}
 		payload, _ := json.Marshal(plan)
-		if scenario == "product_operator" {
+		if operatorTriage {
 			payload = []byte("{}")
 		}
 		if _, err := db.Report(ctx, mid, triage.ID, protocol.Report{Lease: triage.Lease, Result: &protocol.Result{Status: "succeeded", Commit: build, Detail: "fixture", Reply: string(payload)}}); err != nil {
 			t.Fatal(err)
 		}
-		if scenario == "product_operator" {
+		if operatorTriage {
 			tick()
 			e, err := db.Execution(ctx, eid)
 			if err != nil || e.Status != "waiting_qa" || e.QAPhase != "product_review" {
@@ -443,7 +463,7 @@ func testQARework(t *testing.T, scenario string) {
 		t.Fatalf("missing CI recheck: %+v", rebuild.Spec)
 	}
 	report(rebuild, "succeeded", integrated)
-	if scenario == "mixed_environment" {
+	if mixedEnvironment {
 		tick()
 		tick()
 		e, err := db.Execution(ctx, eid)
@@ -458,6 +478,20 @@ func testQARework(t *testing.T, scenario string) {
 		}
 	}
 	review := claim("qa", integrated, "minimax-code")
+	if scenario == "interrupted_rework" {
+		if review.Attempt != 3 {
+			t.Fatalf("expected review after repairing, got attempt %d", review.Attempt)
+		}
+		report(review, "failed", integrated)
+		tick()
+		if _, err := db.ContinueExecution(ctx, eid); err != nil {
+			t.Fatal(err)
+		}
+		review = claim("qa", integrated, "minimax-code")
+		if review.Attempt != 4 {
+			t.Fatalf("expected retry of rebuilt revision, got attempt %d", review.Attempt)
+		}
+	}
 	if !strings.Contains(review.Spec.Prompt, ticketID) {
 		t.Fatal("lost the ticket ID before recheck")
 	}
@@ -492,7 +526,7 @@ func testQARework(t *testing.T, scenario string) {
 		t.Fatalf("release did not follow recheck: %+v %v", e, err)
 	} else {
 		for _, ticket := range e.Tickets["qa"] {
-			if scenario == "product_agent" || scenario == "product_operator" {
+			if scenario == "product_agent" || operatorTriage {
 				if ticket.Owner != "develop" || !slices.Contains(ticket.Helpers, "audio") {
 					t.Fatalf("lost assigned roles: %+v", ticket)
 				}
