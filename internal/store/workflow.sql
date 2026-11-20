@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS step_approvals (
 );
 
 ALTER TABLE executions ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS qa_phase text NOT NULL DEFAULT '';
+ALTER TABLE executions ADD COLUMN IF NOT EXISTS qa_decisions jsonb NOT NULL DEFAULT '{}';
 
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS attempt integer NOT NULL DEFAULT 1 CHECK (attempt>0);
 

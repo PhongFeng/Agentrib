@@ -174,6 +174,27 @@ func (a *API) continueExecution(w http.ResponseWriter, r *http.Request) {
 	response(w, http.StatusOK, execution, err)
 }
 
+func (a *API) decideQA(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Action      string                         `json:"action"`
+		Assignments map[string]protocol.Assignment `json:"assignments,omitempty"`
+		Note        string                         `json:"note,omitempty"`
+	}
+	if !read(w, r, &input) {
+		return
+	}
+	if len(input.Note) > 3000 || strings.ContainsRune(input.Note, 0) {
+		problem(w, http.StatusBadRequest, "产品说明过长或包含无效字符")
+		return
+	}
+	err := a.store.DecideQA(r.Context(), r.PathValue("id"), r.PathValue("run"), input.Action, protocol.QADecision{Assignments: input.Assignments, Note: input.Note})
+	if errors.Is(err, store.ErrConflict) {
+		problem(w, http.StatusConflict, "缺陷状态已变化或分派无效，请刷新并确认当前分工")
+		return
+	}
+	response(w, http.StatusOK, map[string]string{"status": "accepted"}, err)
+}
+
 func (a *API) approve(w http.ResponseWriter, r *http.Request) {
 	err := a.store.Approve(r.Context(), r.PathValue("id"), r.PathValue("step"))
 	response(w, http.StatusOK, map[string]string{"status": "approved"}, err)

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -279,6 +280,12 @@ func TestCIRepairChecksNewCommitBeforeQA(t *testing.T) {
 }
 
 func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
+	for _, scenario := range []string{"direct", "mixed_environment", "product_agent", "product_operator", "round_limit", "no_changes", "legacy_environment"} {
+		t.Run(scenario, func(t *testing.T) { testQARework(t, scenario) })
+	}
+}
+
+func testQARework(t *testing.T, scenario string) {
 	ctx, db, _ := integrationStore(t)
 	enrollment, err := db.Enroll(ctx, "QA rework")
 	if err != nil {
@@ -289,7 +296,8 @@ func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	w, err := db.SaveWorkflow(ctx, protocol.Workflow{ID: "rework", Name: "Rework", Steps: []protocol.Step{
-		{ID: "audio", Executor: "qoder-cn"},
+		{ID: "producer", Executor: "codex"},
+		{ID: "audio", Executor: "qoder-cn", DependsOn: []string{"producer"}},
 		{ID: "develop", Executor: "codex", DependsOn: []string{"audio"}, BaseFrom: "audio", Preflight: true},
 		{ID: "ci", Executor: "engine", DependsOn: []string{"develop"}, BaseFrom: "develop", ExportGame: true},
 		{ID: "qa", Executor: "minimax-code", DependsOn: []string{"ci"}, BaseFrom: "ci", QAGate: true, QARework: true},
@@ -328,15 +336,101 @@ func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
 		}
 	}
 	audio, build, fix, integrated := strings.Repeat("a", 40), strings.Repeat("b", 40), strings.Repeat("c", 40), strings.Repeat("d", 40)
+	report(claim("producer", "", "codex"), "succeeded", build)
 	report(claim("audio", "", "qoder-cn"), "succeeded", audio)
 	report(claim("develop", audio, "codex"), "succeeded", build)
 	report(claim("ci", build, "godot"), "succeeded", build)
 	qa := claim("qa", build, "minimax-code")
 	bug := protocol.Bug{Owner: "audio", Title: "Music missing", Steps: "Enter a level", Expected: "Music loops", Actual: "Silence"}
-	report(qa, "failed", build, bug)
+	ticketID := "QA-" + qa.ID[:7] + "-1"
+	var findings []protocol.Bug
+	if scenario == "product_agent" || scenario == "product_operator" {
+		bug.Owner = "producer"
+	}
+	findings = append(findings, bug)
+	if scenario == "mixed_environment" {
+		env := protocol.Bug{Owner: "environment", Title: "Browser unavailable", Steps: "Open game", Expected: "Browser launches", Actual: "Missing tool"}
+		findings = append(findings, env)
+	}
+	if scenario == "legacy_environment" {
+		bug.Owner = "environment"
+		report(qa, "failed", build, bug)
+		if _, err := db.db.Exec(ctx, `UPDATE executions SET status='failed' WHERE id=$1`, eid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ContinueExecution(ctx, eid); err != nil {
+			t.Fatal(err)
+		}
+		tick()
+		e, err := db.Execution(ctx, eid)
+		if err != nil || e.Status != "waiting_qa" || e.QAPhase != "environment" {
+			t.Fatalf("legacy QA was not resumed: %+v %v", e, err)
+		}
+		if err := db.DecideQA(ctx, eid, qa.ID, "environment_ready", protocol.QADecision{}); err != nil {
+			t.Fatal(err)
+		}
+		recheck := claim("qa", build, "minimax-code")
+		report(recheck, "failed", build, bug)
+		tick()
+		if err := db.DecideQA(ctx, eid, recheck.ID, "stop", protocol.QADecision{}); err != nil {
+			t.Fatal(err)
+		}
+		tick()
+		e, err = db.Execution(ctx, eid)
+		if err != nil || e.Status != "canceled" || len(e.Approved) != 0 {
+			t.Fatalf("termination bypassed QA: %+v %v", e, err)
+		}
+		return
+	}
+	report(qa, "failed", build, findings...)
+	if scenario == "product_agent" || scenario == "product_operator" {
+		triage := claim("qa:triage", build, "codex")
+		plan := map[string]protocol.Assignment{ticketID: {Owner: "develop", Helpers: []string{"audio"}}}
+		payload, _ := json.Marshal(plan)
+		if scenario == "product_operator" {
+			payload = []byte("{}")
+		}
+		if _, err := db.Report(ctx, mid, triage.ID, protocol.Report{Lease: triage.Lease, Result: &protocol.Result{Status: "succeeded", Commit: build, Detail: "fixture", Reply: string(payload)}}); err != nil {
+			t.Fatal(err)
+		}
+		if scenario == "product_operator" {
+			tick()
+			e, err := db.Execution(ctx, eid)
+			if err != nil || e.Status != "waiting_qa" || e.QAPhase != "product_review" {
+				t.Fatalf("expected product decision: %+v %v", e, err)
+			}
+			if err := db.DecideQA(ctx, eid, qa.ID, "assign", protocol.QADecision{}); !errors.Is(err, ErrConflict) {
+				t.Fatalf("accepted incomplete plan: %v", err)
+			}
+			d := protocol.QADecision{Assignments: plan, Note: "Check audio binding"}
+			if err := db.DecideQA(ctx, eid, qa.ID, "assign", d); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.DecideQA(ctx, eid, qa.ID, "assign", d); !errors.Is(err, ErrConflict) {
+				t.Fatalf("accepted replay: %v", err)
+			}
+		}
+	}
 	asset := claim("qa:fix:audio", build, "qoder-cn")
 	if asset.Spec.RepairOf != qa.ID || !strings.Contains(asset.Spec.Prompt, bug.Title) {
 		t.Fatalf("missing ticket handoff: %+v", asset.Spec)
+	}
+	if scenario == "no_changes" {
+		report(asset, "succeeded", build)
+		report(claim("qa:fix:develop", build, "codex"), "succeeded", build)
+		tick()
+		e, err := db.Execution(ctx, eid)
+		if err != nil || e.QAPhase != "product_review" {
+			t.Fatalf("expected no-change review: %+v %v", e, err)
+		}
+		d := protocol.QADecision{Assignments: map[string]protocol.Assignment{ticketID: {Owner: "audio"}}, Note: "Replace missing clip"}
+		if err := db.DecideQA(ctx, eid, qa.ID, "assign", d); err != nil {
+			t.Fatal(err)
+		}
+		asset = claim("qa:fix:audio", build, "qoder-cn")
+		if asset.Attempt != 2 || !strings.Contains(asset.Spec.Prompt, d.Note) {
+			t.Fatal("did not re-dispatch the clarified task")
+		}
 	}
 	report(asset, "succeeded", fix)
 	develop := claim("qa:fix:develop", fix, "codex")
@@ -349,14 +443,63 @@ func TestQAReworkRoutesAudioAndVerifiesRebuiltRevision(t *testing.T) {
 		t.Fatalf("missing CI recheck: %+v", rebuild.Spec)
 	}
 	report(rebuild, "succeeded", integrated)
+	if scenario == "mixed_environment" {
+		tick()
+		tick()
+		e, err := db.Execution(ctx, eid)
+		if err != nil || e.QAPhase != "environment" || e.Status != "waiting_qa" || len(e.Approved) != 0 {
+			t.Fatalf("missing environment gate: %+v %v", e, err)
+		}
+		if job, err := db.Claim(ctx, mid); err != nil || job != nil {
+			t.Fatalf("unexpected pending work: %+v %v", job, err)
+		}
+		if err := db.DecideQA(ctx, eid, qa.ID, "environment_ready", protocol.QADecision{}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	review := claim("qa", integrated, "minimax-code")
+	if !strings.Contains(review.Spec.Prompt, ticketID) {
+		t.Fatal("lost the ticket ID before recheck")
+	}
 	if e, err := db.Execution(ctx, eid); err != nil || e.Status != "running" || len(e.Approved) != 0 {
 		t.Fatalf("released before QA passed: %+v %v", e, err)
+	}
+	if scenario == "round_limit" {
+		bug.ID, bug.Owner, bug.Title = ticketID, "develop", "Audio still not connected"
+		report(review, "failed", integrated, bug)
+		next := strings.Repeat("e", 40)
+		report(claim("qa:fix:develop", integrated, "codex"), "succeeded", next)
+		report(claim("ci", next, "godot"), "succeeded", next)
+		last := claim("qa", next, "minimax-code")
+		report(last, "failed", next, bug)
+		tick()
+		e, err := db.Execution(ctx, eid)
+		if err != nil || e.Status != "waiting_qa" || e.QAPhase != "product_review" || len(e.Tickets["qa"]) != 1 || e.Tickets["qa"][0].ID != ticketID {
+			t.Fatalf("expected product escalation: %+v %v", e, err)
+		}
+		if err := db.DecideQA(ctx, eid, qa.ID, "stop", protocol.QADecision{}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("accepted stale termination: %v", err)
+		}
+		if err := db.DecideQA(ctx, eid, last.ID, "recheck", protocol.QADecision{Note: "Verify against original spec"}); err != nil {
+			t.Fatal(err)
+		}
+		review, integrated = claim("qa", next, "minimax-code"), next
 	}
 	report(review, "succeeded", integrated)
 	tick()
 	tick()
 	if e, err := db.Execution(ctx, eid); err != nil || e.Status != "succeeded" || !slices.Contains(e.Approved, "release") {
 		t.Fatalf("release did not follow recheck: %+v %v", e, err)
+	} else {
+		for _, ticket := range e.Tickets["qa"] {
+			if scenario == "product_agent" || scenario == "product_operator" {
+				if ticket.Owner != "develop" || !slices.Contains(ticket.Helpers, "audio") {
+					t.Fatalf("lost assigned roles: %+v", ticket)
+				}
+			}
+			if !ticket.Closed {
+				t.Fatalf("QA pass left ticket open: %+v", ticket)
+			}
+		}
 	}
 }

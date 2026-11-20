@@ -171,6 +171,12 @@ func scanRun(row pgx.Row, showLease bool) (protocol.Run, error) {
 	if err == nil && result != nil {
 		err = json.Unmarshal(result, &run.Result)
 	}
+	// Older runners transport a completed negative QA verdict as a failed result.
+	// Expose the domain outcome consistently for both historical and new attempts.
+	if err == nil && run.Spec.QARework && run.Status == "failed" && run.Result != nil && run.Result.Detail != "Execution timed out" && protocol.ValidBugs(run.Result.Bugs) {
+		run.Status, run.Result.Status = "rejected", "rejected"
+		run.Result.Detail = "本轮验收未通过，已记录缺陷单"
+	}
 	if !showLease {
 		run.Lease = ""
 	}

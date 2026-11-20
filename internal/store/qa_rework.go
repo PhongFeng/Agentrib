@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -21,123 +22,235 @@ func workflowStep(workflow protocol.Workflow, id string) protocol.Step {
 	return protocol.Step{}
 }
 
-// Rework starts at the rejected revision, so earlier fixes and all approved
-// assets remain in the next build. Each role receives the preceding role's output.
-func handleQAFailure(ctx context.Context, tx pgx.Tx, e protocol.Execution, step protocol.Step, runs map[string]protocol.Run, manual bool) (bool, error) {
-	qa := runs[step.ID]
-	if !step.QARework || qa.Status != "failed" || qa.Result == nil || !protocol.ValidBugs(qa.Result.Bugs) {
-		return false, nil
-	}
+type qaPlan struct {
+	protocol.QAReview
+	stepID string
+	spec   protocol.Spec
+	build  protocol.Run
+}
 
+func (p *qaPlan) state(phase, reason string) qaPlan {
+	p.Phase, p.Reason = phase, reason
+	return *p
+}
+
+func pending(run protocol.Run) bool {
+	switch run.Status {
+	case "claimed", "queued", "running", "canceling":
+		return true
+	}
+	return false
+}
+
+func waitingForQA(phase string) bool {
+	return phase == "product_review" || phase == "environment"
+}
+
+func accountableBugs(bugs []protocol.Bug) []protocol.Bug {
+	var work []protocol.Bug
+	for _, bug := range bugs {
+		if bug.Owner != "environment" {
+			work = append(work, bug)
+		}
+	}
+	return work
+}
+
+// The scheduler, operator actions and console all use the same decision for a
+// specific QA attempt. Only the scheduler creates jobs, under the execution lock.
+func planQA(e protocol.Execution, step protocol.Step, runs map[string]protocol.Run, manual bool) qaPlan {
+	qa := runs[step.ID]
+	p := qaPlan{}
+	if !step.QARework || qa.Status != "rejected" || qa.Result == nil || !protocol.ValidBugs(qa.Result.Bugs) {
+		return p
+	}
+	p.RunID = qa.ID
 	ciStep := workflowStep(e.Workflow, step.BaseFrom)
 	ci := runs[ciStep.ID]
-	if ci.Spec.RecheckOf == qa.ID {
-		if ci.Status != "succeeded" {
-			// CI handles its own failure and keeps this review waiting.
-			return true, nil
+	rebuilt := ci.Spec.RecheckOf == qa.ID
+	if rebuilt && ci.Status != "succeeded" {
+		return p.state("rework", "等待 CI 构建与测试")
+	}
+	if ci.Status != "succeeded" || ci.Result == nil || ci.Result.Commit == "" || !rebuilt && qa.Spec.Commit != ci.Result.Commit {
+		return qaPlan{}
+	}
+	decision := e.Decisions[qa.ID]
+	bugs := accountableBugs(qa.Result.Bugs)
+	develop := workflowStep(e.Workflow, ciStep.BaseFrom)
+	sources := map[string]protocol.Run{"develop": runs[develop.ID]}
+	for _, role := range []string{"art", "audio", "develop"} {
+		if role != "develop" && slices.Contains(develop.DependsOn, role) {
+			sources[role] = runs[role]
 		}
-		if ci.Result == nil || ci.Result.Commit == "" {
-			return false, nil
+		src := sources[role]
+		if _, ok := protocol.FindAgent(src.Spec.Executor); ok && !src.Spec.ReadOnly && src.Status == "succeeded" {
+			p.Roles = append(p.Roles, role)
+		}
+	}
+	if rebuilt || len(bugs) == 0 || decision.Recheck {
+		if len(bugs) < len(qa.Result.Bugs) && !decision.EnvironmentReady {
+			return p.state("environment", "请恢复 QA 执行环境，再对当前构建补验")
 		}
 		spec := qa.Spec
-		spec.Commit = ci.Result.Commit
-		spec.Prompt = workflowPrompt(step, e.Brief) + "\n\n复验上一轮缺陷，同时重新检查其余必要标准。\n" + bugEvidence(qa.Result.Bugs)
-		if err := appendBuildEvidence(ctx, tx, &spec, ci); err != nil {
-			return false, err
+		var open []protocol.Bug
+		for _, t := range e.Tickets[step.ID] {
+			if !t.Closed {
+				open = append(open, t.Bug)
+			}
 		}
-		return true, enqueueWorkflowAttempt(ctx, tx, e.ID, step.ID, qa.Attempt+1, spec)
+		spec.Commit = ci.Result.Commit
+		spec.Prompt = workflowPrompt(step, e.Brief) + "\n复验下列未关闭缺陷及其余必要标准，记录原编号。\n" + bugEvidence(open) + "\n产品补充说明：\n" + decision.Note
+		p.stepID, p.spec, p.build = step.ID, spec, ci
+		return p.state("rechecking", "等待 QA 复验当前构建")
 	}
-	if ci.Status != "succeeded" || ci.Result == nil || ci.Result.Commit == "" || qa.Spec.Commit != ci.Result.Commit {
-		return false, nil
+
+	p = routeQABugs(p, e, runs, qa, ci, bugs, decision)
+	if p.Phase != "" {
+		return p
 	}
-	rounds := make(map[string]bool)
+	return nextQARepair(p, e, runs, sources, qa, ci, bugs, decision, manual)
+}
+
+func routeQABugs(p qaPlan, e protocol.Execution, runs map[string]protocol.Run, qa, ci protocol.Run, bugs []protocol.Bug, decision protocol.QADecision) qaPlan {
+	if len(decision.Assignments) != 0 {
+		p.Assignments = decision.Assignments
+		return p
+	}
+	rounds := map[string]bool{}
 	for _, run := range e.Runs {
 		if run.StepID == ci.StepID && run.Spec.RecheckOf != "" {
 			rounds[run.Spec.RecheckOf] = true
 		}
 	}
-	if !manual && len(rounds) >= automaticQARounds {
-		return false, nil
+	if len(rounds) >= automaticQARounds {
+		return p.state("product_review", "已完成两轮自动返工，请产品确认下一轮分工和修复要求")
 	}
 
-	byOwner := make(map[string][]protocol.Bug)
-	for _, bug := range qa.Result.Bugs {
-		if bug.Owner == "environment" {
-			return false, nil
-		}
-		byOwner[bug.Owner] = append(byOwner[bug.Owner], bug)
-	}
-	develop := workflowStep(e.Workflow, ciStep.BaseFrom)
-	for _, owner := range []string{"art", "audio"} {
-		if len(byOwner[owner]) == 0 {
-			continue
-		}
-		source := runs[owner]
-		if _, ok := protocol.FindAgent(source.Spec.Executor); !ok || source.Spec.ReadOnly || source.Status != "succeeded" ||
-			!slices.Contains(develop.DependsOn, owner) {
-			return false, nil
+	p.Assignments = make(map[string]protocol.Assignment)
+	var ambiguous []protocol.Bug
+	for _, bug := range bugs {
+		if slices.Contains(p.Roles, bug.Owner) {
+			p.Assignments[bug.ID] = protocol.Assignment{Owner: bug.Owner}
+		} else {
+			ambiguous = append(ambiguous, bug)
 		}
 	}
+	if len(ambiguous) == 0 {
+		return p
+	}
+	triageID := qa.StepID + ":triage"
+	triage := runs[triageID]
+	if triage.Spec.RepairOf != qa.ID {
+		source := runs["producer"]
+		agent, ok := protocol.FindAgent(source.Spec.Executor)
+		if !ok || source.Status != "succeeded" {
+			return p.state("product_review", "请产品指定缺陷的主责和协作角色")
+		}
+		p.stepID = triageID
+		p.spec = protocol.Spec{
+			Project: e.Project, MachineID: e.MachineID, Engine: e.Workflow.Engine, Executor: agent.ID, ReadOnly: agent.ReadOnly,
+			Commit: ci.Result.Commit, RepairOf: qa.ID, Title: "产品分诊 QA 缺陷",
+			Prompt: "阅读已确认的项目需求与验收标准，为以下每个编号指定一个主责和必要的协作角色。请勿修改项目。只输出 JSON 对象，键为缺陷编号，值格式为 {\"owner\":\"develop\",\"helpers\":[\"audio\"]}。可用角色：" + strings.Join(p.Roles, ", ") + "。如果需要人工澄清，输出 {}。\n游戏简报：\n" + e.Brief + "\n" + bugEvidence(ambiguous),
+		}
+		return p.state("triaging", "等待产品 Agent 分派缺陷")
+	}
+	if pending(triage) {
+		return p.state("triaging", "产品 Agent 正在分派缺陷")
+	}
+	var assignments map[string]protocol.Assignment
+	if triage.Status != "succeeded" || triage.Result == nil || json.Unmarshal([]byte(triage.Result.Reply), &assignments) != nil || !protocol.ValidAssignments(assignments, ambiguous, p.Roles) {
+		return p.state("product_review", "产品分诊需要人工确认主责和协作角色")
+	}
+	for id, a := range assignments {
+		p.Assignments[id] = a
+	}
+	return p
+}
 
+func nextQARepair(p qaPlan, e protocol.Execution, runs, sources map[string]protocol.Run, qa, ci protocol.Run, bugs []protocol.Bug, decision protocol.QADecision, manual bool) qaPlan {
+	plan := p.Assignments
 	base := ci.Result.Commit
-	for _, owner := range []string{"art", "audio", "develop"} {
-		if owner != "develop" && len(byOwner[owner]) == 0 {
+	for _, role := range []string{"art", "audio", "develop"} {
+		var assigned []protocol.Bug
+		for _, bug := range bugs {
+			a := plan[bug.ID]
+			if a.Owner == role || slices.Contains(a.Helpers, role) {
+				bug.Owner = a.Owner
+				assigned = append(assigned, bug)
+			}
+		}
+		if len(assigned) == 0 && role != "develop" {
 			continue
 		}
-		id := step.ID + ":fix:" + owner
+		id := qa.StepID + ":fix:" + role
 		prior := runs[id]
-		if prior.Spec.RepairOf == qa.ID {
-			switch prior.Status {
-			case "queued", "claimed", "running", "canceling":
-				return true, nil
-			case "succeeded":
-				if prior.Result != nil && prior.Result.Commit != "" && (prior.Result.Commit != base || owner == "develop" && len(byOwner[owner]) == 0) {
-					base = prior.Result.Commit
-					continue
-				}
+		title := map[string]string{"art": "美术修复资源", "audio": "音效修复资源", "develop": "开发修复并集成资源"}[role]
+		if prior.Spec.RepairOf == qa.ID && prior.Spec.QADispatch == decision.Dispatch {
+			if pending(prior) {
+				return p.state("rework", title)
+			}
+			if prior.Status == "succeeded" && prior.Result != nil && prior.Result.Commit != "" {
+				base = prior.Result.Commit
+				continue
 			}
 			if !manual {
-				return false, nil
+				return qaPlan{}
 			}
-			return true, enqueueWorkflowAttempt(ctx, tx, e.ID, id, prior.Attempt+1, prior.Spec)
+			p.stepID, p.spec = id, prior.Spec
+			return p.state("rework", title)
 		}
-		sourceID := owner
-		instructions := "只修复分派给你的缺陷及相关资源，记录修改后的文件和接入方式。"
-		title := map[string]string{"art": "修复美术资源", "audio": "修复音效资源", "develop": "修复代码并接入返工资源"}[owner]
-		bugs := byOwner[owner]
-		if owner == "develop" {
-			sourceID = develop.ID
-			instructions = "修复开发缺陷，检查美术和音效返工产出并接入游戏。按缺陷单复现和验证，保留原验收标准。"
-			bugs = qa.Result.Bugs
+		spec := sources[role].Spec
+		if !slices.Contains(p.Roles, role) {
+			return qaPlan{}
 		}
-		source := runs[sourceID]
-		if _, ok := protocol.FindAgent(source.Spec.Executor); !ok || source.Spec.ReadOnly || source.Status != "succeeded" {
-			return false, nil
-		}
-		spec := source.Spec
 		spec.Title, spec.Commit, spec.MergeCommits, spec.RepairOf = title, base, nil, qa.ID
-		spec.Prompt = instructions + "\n\n游戏简报：\n" + e.Brief + "\n\nQA 缺陷单：\n" + bugEvidence(bugs)
-		return true, enqueueWorkflowAttempt(ctx, tx, e.ID, id, prior.Attempt+1, spec)
+		spec.QADispatch = decision.Dispatch
+		spec.Prompt = "按原验收标准处理分派给你的缺陷。\n" + bugEvidence(assigned)
+		if role == "develop" {
+			spec.Prompt += "\n接入返工资源，检查下列缺陷的集成结果。\n" + bugEvidence(bugs)
+		}
+		spec.Prompt += "\n游戏简报：\n" + e.Brief + "\n产品补充说明：\n" + decision.Note
+		p.stepID, p.spec = id, spec
+		return p.state("rework", title)
 	}
 	if base == ci.Result.Commit {
-		return false, nil
+		return p.state("product_review", "返工未产生版本变更，请产品核对分工或补充复验说明")
 	}
 	spec := ci.Spec
 	spec.Commit, spec.MergeCommits, spec.RecheckOf = base, nil, qa.ID
-	return true, enqueueWorkflowAttempt(ctx, tx, e.ID, ci.StepID, ci.Attempt+1, spec)
+	p.stepID, p.spec = ci.StepID, spec
+	return p.state("rework", "等待 CI 重建并测试修复版本")
 }
 
 func bugEvidence(bugs []protocol.Bug) string {
 	var text strings.Builder
 	for _, bug := range bugs {
-		fmt.Fprintf(&text, "- [%s] %s\n  复现：%s\n  预期：%s\n  实际：%s\n", bug.Owner, bug.Title, bug.Steps, bug.Expected, bug.Actual)
+		fmt.Fprintf(&text, "- %s [%s] %s\n  复现：%s\n  预期：%s\n  实际：%s\n", bug.ID, bug.Owner, bug.Title, bug.Steps, bug.Expected, bug.Actual)
 	}
 	return text.String()
 }
 
 func handleStepFailure(ctx context.Context, tx pgx.Tx, e protocol.Execution, step protocol.Step, runs map[string]protocol.Run, manual bool) (bool, error) {
-	if step.QARework {
-		return handleQAFailure(ctx, tx, e, step, runs, manual)
+	if !step.QARework {
+		return handleCIFailure(ctx, tx, e, step, runs, manual)
 	}
-	return handleCIFailure(ctx, tx, e, step, runs, manual)
+	p := planQA(e, step, runs, manual)
+	if p.stepID == "" {
+		return p.Phase != "", nil
+	}
+	// Freeze the approved routing with the first repair, for subsequent roles
+	// and for the ticket history after this QA attempt has ended.
+	if len(p.Assignments) != 0 && len(e.Decisions[p.RunID].Assignments) == 0 && strings.HasPrefix(p.stepID, step.ID+":fix:") {
+		d := e.Decisions[p.RunID]
+		d.Assignments = p.Assignments
+		if _, err := tx.Exec(ctx, `UPDATE executions SET qa_decisions=jsonb_set(qa_decisions,ARRAY[$2::text],$3) WHERE id=$1`, e.ID, p.RunID, d); err != nil {
+			return false, err
+		}
+	}
+	if p.build.ID != "" {
+		if err := appendBuildEvidence(ctx, tx, &p.spec, p.build); err != nil {
+			return false, err
+		}
+	}
+	return true, enqueueWorkflowAttempt(ctx, tx, e.ID, p.stepID, runs[p.stepID].Attempt+1, p.spec)
 }
