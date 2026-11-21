@@ -70,7 +70,8 @@ func (s *Store) DecideQA(ctx context.Context, id, runID, action string, input pr
 			if _, err := tx.Exec(ctx, `UPDATE executions SET status='canceled',qa_phase='' WHERE id=$1`, id); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE runs SET status=CASE WHEN status='running' THEN 'canceling' ELSE 'canceled' END,updated=now()
+			if _, err := tx.Exec(ctx, `UPDATE runs SET status=CASE WHEN status='running' THEN 'canceling' ELSE 'canceled' END,
+				finished_at=CASE WHEN status IN ('queued','claimed') THEN now() ELSE finished_at END,updated=now()
 				WHERE execution_id=$1 AND status IN ('queued','claimed','running')`, id); err != nil {
 				return err
 			}

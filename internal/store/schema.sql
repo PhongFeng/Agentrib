@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS runs (
 
 CREATE INDEX IF NOT EXISTS runs_claim ON runs (machine_id, created, id) WHERE status = 'queued';
 
+ALTER TABLE runs
+    ADD COLUMN IF NOT EXISTS started_at timestamptz,
+    ADD COLUMN IF NOT EXISTS finished_at timestamptz;
+
 CREATE TABLE IF NOT EXISTS run_events (
     run_id text NOT NULL REFERENCES runs(id),
     seq integer NOT NULL CHECK (seq > 0),

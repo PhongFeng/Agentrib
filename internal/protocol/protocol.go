@@ -55,16 +55,18 @@ type Spec struct {
 }
 
 type Run struct {
-	ID          string    `json:"id"`
-	Spec        Spec      `json:"spec"`
-	Status      string    `json:"status"`
-	Lease       string    `json:"lease,omitempty"`
-	Created     time.Time `json:"created"`
-	Updated     time.Time `json:"updated"`
-	Result      *Result   `json:"result,omitempty"`
-	ExecutionID string    `json:"execution_id,omitempty"`
-	StepID      string    `json:"step_id,omitempty"`
-	Attempt     int       `json:"attempt,omitempty"`
+	ID          string     `json:"id"`
+	Spec        Spec       `json:"spec"`
+	Status      string     `json:"status"`
+	Lease       string     `json:"lease,omitempty"`
+	Created     time.Time  `json:"created"`
+	Updated     time.Time  `json:"updated"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Result      *Result    `json:"result,omitempty"`
+	ExecutionID string     `json:"execution_id,omitempty"`
+	StepID      string     `json:"step_id,omitempty"`
+	Attempt     int        `json:"attempt,omitempty"`
 }
 
 type Event struct {

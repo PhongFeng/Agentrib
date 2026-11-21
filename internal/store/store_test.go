@@ -105,11 +105,18 @@ func TestLeaseCancellationAndReplay(t *testing.T) {
 			claimed = claim.run
 		}
 	}
-	if claimed == nil || claimed.ID != id || claimed.Status != "claimed" {
+	if claimed == nil || claimed.ID != id || claimed.Status != "claimed" || claimed.StartedAt != nil || claimed.FinishedAt != nil {
 		t.Fatalf("bad claim: %+v", claimed)
 	}
 	if err := db.Start(ctx, machine, id, "wrong"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("incorrect lease: %v", err)
+	}
+	if err := db.Start(ctx, machine, id, claimed.Lease); err != nil {
+		t.Fatal(err)
+	}
+	started, err := db.Run(ctx, id)
+	if err != nil || started.StartedAt == nil || started.FinishedAt != nil || started.StartedAt.Before(claimed.Updated) {
+		t.Fatalf("execution time includes queue time or was not recorded: %+v %v", started, err)
 	}
 	if err := db.Start(ctx, machine, id, claimed.Lease); err != nil {
 		t.Fatal(err)
@@ -120,7 +127,7 @@ func TestLeaseCancellationAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if run, err := db.Cancel(ctx, id); err != nil || run.Status != "canceling" {
+	if run, err := db.Cancel(ctx, id); err != nil || run.Status != "canceling" || run.FinishedAt != nil {
 		t.Fatalf("request cancel: %+v %v", run, err)
 	}
 	finish := protocol.Report{Lease: claimed.Lease, Result: &protocol.Result{Status: "canceled", Detail: "stopped"}}
@@ -134,8 +141,14 @@ func TestLeaseCancellationAndReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer other.Close()
-	if run, err := other.Run(ctx, id); err != nil || run.Status != "canceled" || run.Lease != "" {
-		t.Fatalf("restore run: %+v %v", run, err)
+	stopped, err := other.Run(ctx, id)
+	if err != nil || stopped.Status != "canceled" || stopped.Lease != "" ||
+		stopped.StartedAt == nil || !stopped.StartedAt.Equal(*started.StartedAt) ||
+		stopped.FinishedAt == nil || stopped.FinishedAt.Before(*stopped.StartedAt) {
+		t.Fatalf("restore run and timestamps: %+v %v", stopped, err)
+	}
+	if run, err := db.Cancel(ctx, id); err != nil || run.FinishedAt == nil || !run.FinishedAt.Equal(*stopped.FinishedAt) {
+		t.Fatalf("cancel changed a completed run's duration: %+v %v", run, err)
 	}
 	if events, err := other.Events(ctx, id, 0); err != nil || len(events) != 1 || events[0] != event {
 		t.Fatalf("restore events: %+v %v", events, err)
@@ -157,7 +170,7 @@ func TestLeaseCancellationAndReplay(t *testing.T) {
 	if err := db.Start(ctx, machine, newRun, stale.Lease); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expired lease starts: %v", err)
 	}
-	if run, err := db.Run(ctx, newRun); err != nil || run.Status != "lost" {
+	if run, err := db.Run(ctx, newRun); err != nil || run.Status != "lost" || run.StartedAt != nil || run.FinishedAt == nil {
 		t.Fatalf("expired run: %+v %v", run, err)
 	}
 }

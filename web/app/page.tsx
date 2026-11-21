@@ -15,7 +15,7 @@ type Agent = { id: string; name: string; commands: string[]; read_only: boolean 
 type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string; merge_from?: string[]; qa_gate?: boolean; export_game?: boolean; ci_repair_agent?: string; preflight?: boolean; qa_rework?: boolean };
 type Workflow = { id: string; version: number; name: string; engine?: string; steps: Step[] };
 type Artifact = { name: string; sha256: string; bytes: number };
-type Run = { id: string; step_id?: string; attempt?: number; status: string; spec: { title: string; executor: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[]; bugs?: Bug[] } };
+type Run = { id: string; step_id?: string; attempt?: number; status: string; created: string; started_at?: string; finished_at?: string; spec: { title: string; executor: string; commit?: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[]; bugs?: Bug[] } };
 type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[]; qa_phase?: string; qa_reviews?: Record<string, Review>; qa_tickets?: Record<string, Ticket[]> };
 type RunEvent = { seq: number; kind: string; text: string };
 type View = 'workbench' | 'history';
@@ -28,6 +28,37 @@ const emptyProject: ProjectInput = { id: '', name: '', engine: 'godot' };
 const agentAccountLabel: Record<string, string> = { available: '额度可用', limited: '额度受限', signed_in: '已登录', auth_required: '需要认证' };
 const quotaUnits: Record<string, string> = { credits: 'Credits', requests: '次请求', tokens: 'Tokens', CNY: '元', USD: '美元' };
 const quotaNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 });
+const runDate = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
+const webBuild = 'godot-web.zip';
+
+function durationText(milliseconds: number) {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  return [hours && `${hours} 小时`, minutes && `${minutes} 分`, `${seconds % 60} 秒`].filter(Boolean).join(' ');
+}
+
+function RunTiming({ run, now }: { run?: Run; now: number }) {
+  if (!run || ['queued', 'claimed'].includes(run.status) || !run.started_at && run.finished_at) {
+    return <p className="run-timing">未开始</p>;
+  }
+  if (!run.started_at) {
+    return <p className="run-timing">{run.created && <span>入队 <time dateTime={run.created}>{runDate.format(new Date(run.created))}</time></span>}
+      <span>开始时间和耗时未记录</span></p>;
+  }
+  const start = new Date(run.started_at);
+  const end = run.finished_at ? Date.parse(run.finished_at) : now;
+  return <p className="run-timing"><span>开始 <time dateTime={run.started_at}>{runDate.format(start)}</time></span>
+    <span>{run.finished_at ? '耗时' : '已运行'} {durationText(end - start.getTime())}</span></p>;
+}
+
+function qaBuildFor(step: Step, attempts: Map<string, Run[]>, qa?: Run) {
+  const dependencies = new Set([step.base_from || '', ...(step.depends_on || [])]);
+  const activeRevision = qa && ['queued', 'claimed', 'running', 'canceling'].includes(qa.status) ? qa.spec.commit : undefined;
+  return [...dependencies].flatMap(id => attempts.get(id) || []).find(run =>
+    run.status === 'succeeded' && run.result?.commit && (!activeRevision || run.result.commit === activeRevision) &&
+    run.result.artifacts?.some(artifact => artifact.name === webBuild));
+}
 
 function runStatus(status: string, detail?: string) {
   if (status === 'failed' && detail === 'Execution timed out') return '执行超时';
@@ -276,11 +307,12 @@ export default function Console() {
   const canContinue = execution?.status === 'failed' && currentRuns.some(current => ['rejected', 'failed', 'lost', 'canceled'].includes(current.status));
   const resumeQA = canContinue && Object.values(execution?.qa_reviews || {}).some(review => review.phase !== 'rechecking');
   const deliveryFinished = execution?.status === 'succeeded' && execution.workflow?.steps.some(step => step.executor === 'notify' && completed.has(step.id));
-  const exportRun = currentRuns.find(item => item.status === 'succeeded' && item.result?.artifacts?.some(artifact => artifact.name === 'godot-web.zip'));
+  const exportRun = currentRuns.find(item => item.status === 'succeeded' && item.result?.artifacts?.some(artifact => artifact.name === webBuild));
   const qaRuns = (execution?.workflow?.steps || []).filter(step => step.qa_gate).map(step => attemptsByStep.get(step.id)?.[0]);
   const qaRun = qaRuns.find(item => item?.status === 'succeeded');
   const delivered = deliveryFinished && qaRuns.length > 0 && qaRuns.every(item => item?.status === 'succeeded');
   const deferredTickets = Object.values(execution?.qa_tickets || {}).flat().filter(ticket => ticket.deferred_reason).length;
+  const now = Date.now();
 
   return <>
     <header><div className="frame header"><a className="brand" href="/"><BrandMark height={20} /><span className="brand-name">Agent<span>rib</span></span></a><span className="header-sub">游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
@@ -505,18 +537,27 @@ export default function Console() {
               : '工作流已结束，未记录 QA 通过。'}</p>
             {(qaRun || exportRun) && <div className="actions">
               {qaRun && <button onClick={() => { if (qaRun.id !== runID) selectRun(qaRun.id); }}>查看 QA 报告</button>}
-              {exportRun && <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, 'godot-web.zip'))}>下载试玩包</button>}
+              {exportRun && <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, webBuild))}>下载试玩包</button>}
             </div>}
           </div>}
           {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{execution.workflow.steps.map(step => {
             const [current, ...history] = attemptsByStep.get(step.id) || [];
+            const qaBuild = step.qa_gate && !deliveryFinished ? qaBuildFor(step, attemptsByStep, current) : undefined;
             const review = ['running', 'waiting_qa'].includes(execution.status) ? execution.qa_reviews?.[step.id] : undefined;
             const reviewed = review ? [current, ...history].find(attempt => attempt?.id === review.run_id) : current;
             const repairs = [':triage', ':repair', ':fix:art', ':fix:audio', ':fix:develop'].flatMap(suffix => attemptsByStep.get(step.id + suffix) || []);
             const ready = step.executor === 'approval' && execution.status === 'running' && (step.depends_on || []).every(id => completed.has(id)) && !completed.has(step.id);
             const status = current?.status || (completed.has(step.id) ? 'succeeded' : ready ? 'ready' : 'waiting');
             return <li key={step.id} data-tone={tone(runStatus(status, current?.result?.detail))}><div><strong>{step.name}</strong><p>{step.role} · {step.executor === 'engine' ? executionEngine : executorName(step.executor)} · {step.executor === 'notify' && completed.has(step.id) ? '已通知' : runStatus(status, current?.result?.detail)}{(current?.attempt ?? 1) > 1 && ` · 第 ${current.attempt} 次`}</p>
-              {history.length > 0 && <details><summary>历史尝试</summary><div className="actions">{history.map(previous => <button key={previous.id} onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>)}</div></details>}
+              {step.executor !== 'approval' && step.executor !== 'notify' && <RunTiming run={current} now={now} />}
+              {qaBuild && <div className="qa-preview">
+                <button disabled={busy} onClick={() => void action(() => downloadArtifact(qaBuild.id, webBuild))}>下载 QA 试玩包</button>
+                <span>CI 构建 <code title={qaBuild.result?.commit}>{qaBuild.result?.commit?.slice(0, 7)}</code> · 测试版</span>
+              </div>}
+              {history.length > 0 && <details><summary>历史尝试</summary><div className="run-attempts">{history.map(previous => <div key={previous.id}>
+                <button onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>
+                <RunTiming run={previous} now={now} />
+              </div>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
               {execution.qa_tickets?.[step.id]?.length ? <QAReview key={reviewed?.id} tickets={execution.qa_tickets[step.id]}
                 review={review} bugs={reviewed?.result?.bugs || []} busy={busy} decide={body => void action(async () => {
@@ -525,13 +566,17 @@ export default function Console() {
                   const detail = await api<Execution>(token, '/executions/' + execution.id);
                   setHistory(h => h?.detail?.id === detail.id ? { ...h, detail, executions: h.executions.map(item => item.id === detail.id ? detail : item) } : h);
                 })} /> : null}
-              {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="actions">{repairs.map(repair => <button key={repair.id} onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>)}</div></details>}
+              {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="run-attempts">{repairs.map(repair => <div key={repair.id}>
+                <button onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>
+                <RunTiming run={repair} now={now} />
+              </div>)}</div></details>}
             </div><div className="actions">
               {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
             </div></li>;
           })}</ol></>}
           {run && <article className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
+            <RunTiming run={run} now={now} />
             {run.result && <p>{run.result.detail === 'Execution timed out' ? '执行超时' : run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
             {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>{execution?.runs?.find(r => r.id === run.id)?.result?.bugs?.[i]?.id || bug.id || `QA-${run.id.slice(0, 7)}-${i + 1}`} · {bug.title}</strong>
               <p>负责角色　{qaRoles[bug.owner] || bug.owner}</p>
