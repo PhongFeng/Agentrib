@@ -3,15 +3,14 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/PhongFeng/Agentrib/internal/protocol"
 )
 
-func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prompt string, readOnly bool, emit Emit) (string, error) {
+func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prompt string, readOnly bool, replyLimit int, emit Emit) (string, error) {
 	var answer string
 	var lastMessage string
 	var output strings.Builder
@@ -21,9 +20,11 @@ func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prom
 			answer = text
 		case "agent":
 			lastMessage = text
-			if output.Len() <= protocol.MaxBriefBytes {
-				output.WriteString(text[:min(len(text), protocol.MaxBriefBytes+1)])
-				output.WriteByte('\n')
+			if readOnly && output.Len() <= replyLimit {
+				if output.Len() > 0 {
+					output.WriteByte('\n')
+				}
+				output.WriteString(text[:min(len(text), replyLimit+1-output.Len())])
 			}
 		default:
 			emit(kind, text)
@@ -44,7 +45,7 @@ func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prom
 			return "", errors.New("Codex did not return a final reply")
 		}
 		defer file.Close()
-		body, err := io.ReadAll(io.LimitReader(file, protocol.MaxBriefBytes+1))
+		body, err := io.ReadAll(io.LimitReader(file, int64(replyLimit)+1))
 		if err != nil {
 			return "", err
 		}
@@ -61,15 +62,15 @@ func (r *Runner) finalAgentReply(ctx context.Context, backend Backend, dir, prom
 			}
 		}
 	}
-	if len(answer) > protocol.MaxBriefBytes {
-		return "", errors.New("Agent 回复过长")
+	if len(answer) > replyLimit {
+		return "", fmt.Errorf("Agent 回复过长（上限 %d 字节）", replyLimit)
 	}
 	if r.cfg.token != "" {
 		answer = strings.ReplaceAll(answer, r.cfg.token, "[redacted]")
 	}
 	answer = strings.TrimSpace(strings.ReplaceAll(strings.ToValidUTF8(answer, "�"), "\x00", ""))
-	if len(answer) > protocol.MaxBriefBytes {
-		return "", errors.New("Agent 回复过长")
+	if len(answer) > replyLimit {
+		return "", fmt.Errorf("Agent 回复过长（上限 %d 字节）", replyLimit)
 	}
 	if answer == "" {
 		return "", errors.New("Agent 没有返回内容")
