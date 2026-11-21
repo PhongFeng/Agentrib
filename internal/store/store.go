@@ -19,7 +19,7 @@ import (
 var schema string
 
 const leaseInterval = "interval '45 seconds'"
-const runColumns = "id, spec, status, lease, created, updated, result, execution_id, step_id, attempt"
+const runColumns = "id, spec, status, lease, created, updated, started_at, finished_at, result, execution_id, step_id, attempt"
 const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review"
 
 var ErrConflict = errors.New("run state or lease changed")
@@ -154,7 +154,7 @@ func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Hear
 }
 
 func (s *Store) expire(ctx context.Context) error {
-	_, err := s.db.Exec(ctx, `UPDATE runs SET status='lost',updated=now(),result='{"status":"lost","detail":"Runner lease expired"}'
+	_, err := s.db.Exec(ctx, `UPDATE runs SET status='lost',updated=now(),finished_at=lease_expires,result='{"status":"lost","detail":"Runner lease expired"}'
 		WHERE status IN ('claimed','running','canceling') AND lease_expires <= now()`)
 	return err
 }
@@ -164,7 +164,7 @@ func (s *Store) Sweep(ctx context.Context) error { return s.expire(ctx) }
 func scanRun(row pgx.Row, showLease bool) (protocol.Run, error) {
 	var run protocol.Run
 	var spec, result []byte
-	err := row.Scan(&run.ID, &spec, &run.Status, &run.Lease, &run.Created, &run.Updated, &result, &run.ExecutionID, &run.StepID, &run.Attempt)
+	err := row.Scan(&run.ID, &spec, &run.Status, &run.Lease, &run.Created, &run.Updated, &run.StartedAt, &run.FinishedAt, &result, &run.ExecutionID, &run.StepID, &run.Attempt)
 	if err == nil {
 		err = json.Unmarshal(spec, &run.Spec)
 	}
@@ -273,7 +273,7 @@ func (s *Store) Claim(ctx context.Context, machine string) (*protocol.Run, error
 }
 
 func (s *Store) Start(ctx context.Context, machine, id, lease string) error {
-	tag, err := s.db.Exec(ctx, `UPDATE runs SET status='running',lease_expires=now()+`+leaseInterval+`,updated=now()
+	tag, err := s.db.Exec(ctx, `UPDATE runs SET status='running',started_at=coalesce(started_at,now()),lease_expires=now()+`+leaseInterval+`,updated=now()
 		WHERE machine_id=$1 AND id=$2 AND lease=$3 AND lease_expires>now() AND status IN ('claimed','running')`, machine, id, lease)
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrConflict
@@ -286,7 +286,9 @@ func (s *Store) Cancel(ctx context.Context, id string) (protocol.Run, error) {
 		return protocol.Run{}, err
 	}
 	row := s.db.QueryRow(ctx, `UPDATE runs SET status=CASE WHEN status IN ('queued','claimed') THEN 'canceled'
-		WHEN status='running' THEN 'canceling' ELSE status END,updated=now() WHERE id=$1 RETURNING `+runColumns, id)
+		WHEN status='running' THEN 'canceling' ELSE status END,
+		finished_at=CASE WHEN status IN ('queued','claimed') THEN now() ELSE finished_at END,updated=now()
+		WHERE id=$1 RETURNING `+runColumns, id)
 	return scanRun(row, false)
 }
 
@@ -325,7 +327,7 @@ func (s *Store) Report(ctx context.Context, machine, id string, report protocol.
 			result = protocol.Result{Status: "canceled", Detail: "Runner confirmed the process stopped"}
 		}
 		reply.Status = result.Status
-		_, err = tx.Exec(ctx, `UPDATE runs SET status=$2,result=$3,updated=now() WHERE id=$1`, id, result.Status, result)
+		_, err = tx.Exec(ctx, `UPDATE runs SET status=$2,result=$3,updated=now(),finished_at=now() WHERE id=$1`, id, result.Status, result)
 	} else {
 		_, err = tx.Exec(ctx, `UPDATE runs SET lease_expires=now()+`+leaseInterval+`,updated=now() WHERE id=$1`, id)
 	}
