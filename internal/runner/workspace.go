@@ -159,7 +159,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	}
 	var finalReply string
 	if run.IsProductTriage() {
-		answer, err := r.finalAgentReply(ctx, backend, dir, run.Spec.Prompt, run.Spec.ReadOnly, emit)
+		answer, err := r.finalAgentReply(ctx, backend, dir, run.Spec.Prompt, run.Spec.ReadOnly, protocol.MaxBriefBytes, emit)
 		if err != nil {
 			return result, err
 		}
@@ -168,7 +168,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		return result, nil
 	}
 	if brief {
-		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, true, emit)
+		finalReply, err = r.finalAgentReply(ctx, backend, dir, "游戏引擎为 "+engine.Name+"。\n\n"+run.Spec.Prompt, true, protocol.MaxBriefBytes, emit)
 	} else {
 		mode := "Keep all edits in this worktree. The Runner records the final changes as a local Git commit."
 		if run.Spec.ReadOnly {
@@ -182,7 +182,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 			if run.Spec.QARework {
 				prompt += qaReworkInstructions
 			}
-			finalReply, err = r.finalAgentReply(ctx, backend, dir, prompt, run.Spec.ReadOnly, emit)
+			finalReply, err = r.finalAgentReply(ctx, backend, dir, prompt, run.Spec.ReadOnly, maxQAReplyBytes, emit)
 		} else {
 			err = backend.Execute(ctx, dir, prompt, run.Spec.ReadOnly, emit)
 		}
