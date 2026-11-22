@@ -150,6 +150,10 @@ func (r *Runner) uploadArtifacts(ctx context.Context, job protocol.Run, result *
 	result.Artifacts = nil
 	for _, artifact := range files {
 		if err := r.uploadArtifact(ctx, job, artifact); err != nil {
+			if strings.HasPrefix(artifact.Name, protocol.PreviewArtifactPrefix) {
+				// The Git result remains usable when an optional preview upload fails.
+				continue
+			}
 			return fmt.Errorf("upload %s: %w", artifact.Name, err)
 		}
 		result.Artifacts = append(result.Artifacts, artifact)

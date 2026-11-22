@@ -230,8 +230,9 @@ func (s *Store) Run(ctx context.Context, id string) (protocol.Run, error) {
 	return scanRun(s.db.QueryRow(ctx, `SELECT `+runColumns+` FROM runs WHERE id=$1`, id), false)
 }
 
-func (s *Store) Events(ctx context.Context, id string, after int) ([]protocol.Event, error) {
-	rows, err := s.db.Query(ctx, `SELECT seq,kind,body FROM run_events WHERE run_id=$1 AND seq>$2 ORDER BY seq LIMIT 200`, id, after)
+func (s *Store) Events(ctx context.Context, id string, after int, resultOnly bool) ([]protocol.Event, error) {
+	rows, err := s.db.Query(ctx, `SELECT seq,kind,body FROM run_events WHERE run_id=$1 AND seq>$2
+		AND (NOT $3 OR kind IN ('qa','error')) ORDER BY seq LIMIT 200`, id, after, resultOnly)
 	if err != nil {
 		return nil, err
 	}

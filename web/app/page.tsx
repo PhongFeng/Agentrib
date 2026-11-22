@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type FormEvent } from 'react';
 import { api, newID } from './api';
 import { QAReview, qaRoles, type Bug, type Ticket, type Review } from './qa-review';
 import { BriefChat, clearBriefChats } from './brief-chat';
+import { isPreview, resultLabel, RunPreviews, type Artifact } from './run-previews';
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
@@ -14,7 +15,6 @@ type Engine = { id: string; name: string; implemented: boolean };
 type Agent = { id: string; name: string; commands: string[]; read_only: boolean };
 type Step = { id: string; name: string; role: string; executor: string; prompt?: string; read_only?: boolean; depends_on: string[] | null; base_from?: string; merge_from?: string[]; qa_gate?: boolean; export_game?: boolean; ci_repair_agent?: string; preflight?: boolean; qa_rework?: boolean };
 type Workflow = { id: string; version: number; name: string; engine?: string; steps: Step[] };
-type Artifact = { name: string; sha256: string; bytes: number };
 type Run = { id: string; step_id?: string; attempt?: number; status: string; created: string; started_at?: string; finished_at?: string; spec: { title: string; executor: string; commit?: string }; result?: { detail: string; commit?: string; artifacts?: Artifact[]; bugs?: Bug[] } };
 type Execution = { id: string; workflow_id: string; version: number; project: string; status: string; brief: string; workflow?: Workflow; runs?: Run[]; approved?: string[]; qa_phase?: string; qa_reviews?: Record<string, Review>; qa_tickets?: Record<string, Ticket[]> };
 type RunEvent = { seq: number; kind: string; text: string };
@@ -198,7 +198,7 @@ export default function Console() {
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const result = await api<{ run: Run; events: RunEvent[] }>(token, `/runs/${activeRunID}?after=${cursor}`);
+        const result = await api<{ run: Run; events: RunEvent[] }>(token, `/runs/${activeRunID}?summary=1&after=${cursor}`);
         if (disposed) return;
         setRun(result.run);
         if (result.events.length) {
@@ -214,6 +214,10 @@ export default function Console() {
     void refresh();
     return () => { disposed = true; clearTimeout(timer); };
   }, [token, activeRunID]);
+
+  useEffect(() => {
+    if (run?.id) document.getElementById('run-result')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [run?.id]);
 
   async function action(fn: () => Promise<void>) {
     if (busy) return;
@@ -555,7 +559,7 @@ export default function Console() {
                 <span>CI 构建 <code title={qaBuild.result?.commit}>{qaBuild.result?.commit?.slice(0, 7)}</code> · 测试版</span>
               </div>}
               {history.length > 0 && <details><summary>历史尝试</summary><div className="run-attempts">{history.map(previous => <div key={previous.id}>
-                <button onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>查看第 {previous.attempt ?? 1} 次日志 · {runStatus(previous.status, previous.result?.detail)}</button>
+                <button onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>第 {previous.attempt ?? 1} 次 · {runStatus(previous.status, previous.result?.detail)} · {resultLabel(previous.result?.artifacts)}</button>
                 <RunTiming run={previous} now={now} />
               </div>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
@@ -571,19 +575,22 @@ export default function Console() {
                 <RunTiming run={repair} now={now} />
               </div>)}</div></details>}
             </div><div className="actions">
-              {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>查看日志</button>}
+              {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>{resultLabel(current.result?.artifacts)}</button>}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
             </div></li>;
           })}</ol></>}
-          {run && <article className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
+          {run && <article id="run-result" className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
             <RunTiming run={run} now={now} />
             {run.result && <p>{run.result.detail === 'Execution timed out' ? '执行超时' : run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
             {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>{execution?.runs?.find(r => r.id === run.id)?.result?.bugs?.[i]?.id || bug.id || `QA-${run.id.slice(0, 7)}-${i + 1}`} · {bug.title}</strong>
               <p>负责角色　{qaRoles[bug.owner] || bug.owner}</p>
               <p>复现　{bug.steps}</p><p>预期　{bug.expected}</p><p>实际　{bug.actual}</p>
             </li>)}</ol></section>}
-            {run.result?.artifacts?.length ? <ul>{run.result.artifacts.map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul> : null}
-            <pre className="log" aria-label="执行日志">{events.length ? events.map(event => `[${event.kind}] ${event.text}`).join('\n') : '等待执行日志…'}</pre>
+            {run.result?.artifacts?.some(isPreview) && <RunPreviews key={run.id} runID={run.id} artifacts={run.result.artifacts} token={token} />}
+            {run.result?.artifacts?.some(item => !isPreview(item) && !item.name.endsWith('.log')) &&
+              <ul>{run.result.artifacts.filter(item => !isPreview(item) && !item.name.endsWith('.log')).map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul>}
+            {events.filter(event => event.kind === 'error').map(event => <p className="result-error" key={event.seq}>{event.text}</p>)}
+            {events.some(event => event.kind === 'qa') && <details><summary>QA 验收报告</summary><pre className="report-text">{events.filter(event => event.kind === 'qa').map(event => event.text).join('\n')}</pre></details>}
           </article>}
         </section>
       </>}

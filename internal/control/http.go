@@ -241,7 +241,7 @@ func (a *API) run(w http.ResponseWriter, r *http.Request) {
 		response(w, 0, nil, err)
 		return
 	}
-	events, err := a.store.Events(r.Context(), id, after)
+	events, err := a.store.Events(r.Context(), id, after, r.URL.Query().Get("summary") == "1")
 	response(w, http.StatusOK, map[string]any{"run": run, "events": events}, err)
 }
 
@@ -357,7 +357,7 @@ func validResult(result *protocol.Result) bool {
 	if result.Status != "succeeded" && result.Status != "failed" && result.Status != "canceled" {
 		return false
 	}
-	if !validText(result.Detail, 3000) || result.Commit != "" && !commitPattern.MatchString(result.Commit) || len(result.Artifacts) > 12 {
+	if !validText(result.Detail, 3000) || result.Commit != "" && !commitPattern.MatchString(result.Commit) || len(result.Artifacts) > 12+protocol.MaxPreviewArtifacts {
 		return false
 	}
 	if result.Reply != "" && (result.Status != "succeeded" || !validText(result.Reply, protocol.MaxBriefBytes)) {
@@ -369,10 +369,17 @@ func validResult(result *protocol.Result) bool {
 	if len(result.Bugs) > 0 && (result.Status != "failed" || !protocol.ValidBugs(result.Bugs)) {
 		return false
 	}
+	previews := 0
 	for _, artifact := range result.Artifacts {
 		if !validArtifact(artifact.Name) || !shaPattern.MatchString(artifact.Digest) || artifact.Bytes < 1 || artifact.Bytes > maxArtifact {
 			return false
 		}
+		if strings.HasPrefix(artifact.Name, protocol.PreviewArtifactPrefix) {
+			if artifact.Bytes > protocol.MaxPreviewBytes {
+				return false
+			}
+			previews++
+		}
 	}
-	return true
+	return previews <= protocol.MaxPreviewArtifacts && len(result.Artifacts)-previews <= 12
 }

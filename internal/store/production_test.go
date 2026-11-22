@@ -96,7 +96,7 @@ func TestContinueExecutionPreservesSuccessfulInputs(t *testing.T) {
 	if err != nil || final.Status != "succeeded" || len(final.Runs) != 5 {
 		t.Fatalf("retry did not lead to a completed execution: %+v %v", final, err)
 	}
-	old, err := reopened.Events(ctx, failed.ID, 0)
+	old, err := reopened.Events(ctx, failed.ID, 0, false)
 	if err != nil || len(old) != 1 || old[0].Text != timeout.Detail {
 		t.Fatalf("failed attempt's log was lost: %+v %v", old, err)
 	}

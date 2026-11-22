@@ -256,6 +256,12 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		return result, err
 	}
 	result.Commit = commit
+	if run.ExecutionID != "" {
+		result.Artifacts, err = capturePreviews(ctx, checkout, dir, commit, run.StepID, filepath.Join(r.cfg.State, "artifacts", run.ID))
+		if err != nil {
+			emit("diagnostic", "未能整理部分产出预览："+err.Error())
+		}
+	}
 	return result, nil
 }
 

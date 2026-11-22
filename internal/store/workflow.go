@@ -63,6 +63,12 @@ func scanWorkflow(row pgx.Row) (protocol.Workflow, error) {
 	if err == nil {
 		err = json.Unmarshal(steps, &workflow.Steps)
 	}
+	for i := range workflow.Steps {
+		step := &workflow.Steps[i]
+		if step.ID == "producer" && step.Role == "制作人 / 产品 Agent" {
+			step.Role = "产品 Agent"
+		}
+	}
 	return workflow, err
 }
 

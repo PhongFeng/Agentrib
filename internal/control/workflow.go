@@ -11,8 +11,8 @@ import (
 )
 
 var gameTemplate = protocol.Workflow{ID: "game-delivery", Name: "游戏制作与交付", Engine: protocol.DefaultEngine, Steps: []protocol.Step{
-	{ID: "producer", Name: "完善需求并拆分任务", Role: "制作人 / 产品 Agent", DependsOn: []string{},
-		Prompt: "以已确认的游戏简报和现有项目为依据，写入 docs/production/requirements.md，明确玩法、范围、约束和可验证的验收标准。同目录下分别写 art.md、audio.md、development.md，给各 Agent 说明任务、资源清单、格式、路径、接口和验收标准。约定美术与音效资源各自使用的目录，明确双方的集成接口。提交需求文档，并用简报中的明确决策约束方案。"},
+	{ID: "producer", Name: "完善需求并拆分任务", Role: "产品 Agent", DependsOn: []string{},
+		Prompt: "以制作人确认的游戏简报和现有项目为依据，写入 docs/production/requirements.md，明确玩法、范围、约束和可验证的验收标准。同目录下分别写 art.md、audio.md、development.md，给各 Agent 说明任务、资源清单、格式、路径、接口和验收标准。约定美术与音效资源各自使用的目录，明确双方的集成接口。提交需求文档，并用简报中的明确决策约束方案。"},
 	{ID: "art", Name: "制作美术资源", Role: "美术 Agent", DependsOn: []string{"producer"}, BaseFrom: "producer",
 		Prompt: "阅读 docs/production/requirements.md 和 docs/production/art.md。制作任务要求的可用美术资源，按约定路径提交，并在 docs/production/art-handoff.md 记录文件、用途和接入说明。只修改本角色负责的资源和交接文档。"},
 	{ID: "audio", Name: "制作音效资源", Role: "音效 Agent", DependsOn: []string{"producer"}, BaseFrom: "producer",

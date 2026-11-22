@@ -150,8 +150,11 @@ func TestLeaseCancellationAndReplay(t *testing.T) {
 	if run, err := db.Cancel(ctx, id); err != nil || run.FinishedAt == nil || !run.FinishedAt.Equal(*stopped.FinishedAt) {
 		t.Fatalf("cancel changed a completed run's duration: %+v %v", run, err)
 	}
-	if events, err := other.Events(ctx, id, 0); err != nil || len(events) != 1 || events[0] != event {
+	if events, err := other.Events(ctx, id, 0, false); err != nil || len(events) != 1 || events[0] != event {
 		t.Fatalf("restore events: %+v %v", events, err)
+	}
+	if events, err := other.Events(ctx, id, 0, true); err != nil || len(events) != 0 {
+		t.Fatalf("result view included a routine event: %+v %v", events, err)
 	}
 	newRun, _ := newID()
 	if _, err := db.CreateRun(ctx, newRun, spec); err != nil {

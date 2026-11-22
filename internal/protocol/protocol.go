@@ -81,6 +81,12 @@ type Artifact struct {
 	Bytes  int64  `json:"bytes"`
 }
 
+const (
+	PreviewArtifactPrefix = "preview-"
+	MaxPreviewArtifacts   = 48
+	MaxPreviewBytes       = 8 << 20
+)
+
 type Result struct {
 	Status    string     `json:"status"`
 	Detail    string     `json:"detail"`
