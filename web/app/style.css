@@ -197,6 +197,7 @@ fieldset .text-button{margin-top:6px;padding-left:0}
 .run-timing{display:flex;flex-wrap:wrap;column-gap:12px;row-gap:2px;font-variant-numeric:tabular-nums}
 .run-attempts{display:grid;gap:10px;margin-top:8px}
 .run-attempts button{white-space:normal;text-align:left}
+.preview-action{color:var(--mint-2);border-color:var(--good-bd)}
 .qa-preview{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:10px}
 .qa-preview span{color:var(--muted);font-size:12.5px}
 
@@ -212,7 +213,13 @@ fieldset .text-button{margin-top:6px;padding-left:0}
 .run-detail>ul li{display:flex;align-items:center;gap:10px}
 .run-detail>ul span{color:var(--muted);font-size:12px;font-family:var(--mono)}
 .report-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}
-.result-error{color:var(--red)}
+.run-detail .summary-events{margin:12px 0;list-style:none;padding:0;gap:6px;font-size:13px;color:var(--muted)}
+.summary-events li[data-kind="error"]{color:var(--red)}
+.preview-dialog{width:min(960px,calc(100% - 28px));max-height:calc(100dvh - 36px);margin:auto;padding:0;overflow:hidden;background:var(--surface);color:var(--ink);border:1px solid var(--border-2);border-radius:14px;box-shadow:0 20px 60px #0008}
+.preview-dialog[open]{display:flex;flex-direction:column}
+.preview-dialog::backdrop{background:#050a14c7}
+.preview-heading{padding:14px 18px;border-bottom:1px solid var(--border);flex:none}
+.preview-body{padding:16px;overflow:auto;overscroll-behavior:contain}
 .asset-previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:12px}
 .asset-previews figure{margin:0;padding:10px;border:1px solid var(--border);border-radius:10px}
 .asset-previews figcaption{overflow-wrap:anywhere;margin-bottom:8px;font-size:13px}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -24,13 +24,12 @@ function fileName(artifact: Artifact) {
   return artifact.name.replace(/^preview-\d+-/, '');
 }
 
-export function resultLabel(artifacts?: Artifact[]) {
+export function previewLabel(artifacts?: Artifact[]) {
   const item = artifacts?.find(isPreview);
   const mime = item && kind(item);
   if (mime === 'text/markdown') return '查看产品文档';
   if (mime?.startsWith('image/')) return '查看美术';
   if (mime?.startsWith('audio/')) return '试听音效';
-  return '查看结果';
 }
 
 function PreviewFile({ runID, artifact, token }: { runID: string; artifact: Artifact; token: string }) {
@@ -78,7 +77,7 @@ function PreviewFile({ runID, artifact, token }: { runID: string; artifact: Arti
   return <img src={value} alt={name} loading="lazy" onError={() => setError('图片无法显示')} />;
 }
 
-export function RunPreviews({ runID, artifacts, token }: { runID: string; artifacts: Artifact[]; token: string }) {
+function RunPreviews({ runID, artifacts, token }: { runID: string; artifacts: Artifact[]; token: string }) {
   const previews = artifacts.filter(isPreview);
   const docs = previews.filter(file => kind(file) === 'text/markdown');
   const media = previews.filter(file => kind(file) !== 'text/markdown');
@@ -96,4 +95,20 @@ export function RunPreviews({ runID, artifacts, token }: { runID: string; artifa
       <PreviewFile runID={runID} artifact={file} token={token} />
     </figure>)}</div>}
   </section>;
+}
+
+export function RunPreviewDialog({ title, runID, artifacts, token, onClose }: {
+  title: string; runID: string; artifacts: Artifact[]; token: string; onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, []);
+  return <dialog ref={dialog} className="preview-dialog" aria-label={title} onClose={onClose}>
+    <div className="line preview-heading">
+      <h3>{title}</h3>
+      <button type="button" onClick={() => dialog.current?.close()}>关闭</button>
+    </div>
+    <div className="preview-body"><RunPreviews runID={runID} artifacts={artifacts} token={token} /></div>
+  </dialog>;
 }

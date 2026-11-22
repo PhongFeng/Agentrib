@@ -4,7 +4,7 @@ import { useEffect, useId, useState, type FormEvent } from 'react';
 import { api, newID } from './api';
 import { QAReview, qaRoles, type Bug, type Ticket, type Review } from './qa-review';
 import { BriefChat, clearBriefChats } from './brief-chat';
-import { isPreview, resultLabel, RunPreviews, type Artifact } from './run-previews';
+import { isPreview, previewLabel, RunPreviewDialog, type Artifact } from './run-previews';
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
@@ -121,6 +121,7 @@ export default function Console() {
   const [history, setHistory] = useState<History>();
   const [executionID, setExecutionID] = useState('');
   const [runID, setRunID] = useState('');
+  const [previewRunID, setPreviewRunID] = useState('');
   const [runData, setRun] = useState<Run>();
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [busy, setBusy] = useState(false);
@@ -190,6 +191,7 @@ export default function Console() {
   const execution = history?.detail?.id === executionID && history.detail.project === historyProject ? history.detail : undefined;
   const activeRunID = view === 'history' && execution?.runs?.some(item => item.id === runID) ? runID : '';
   const run = activeRunID && runData?.id === activeRunID ? runData : undefined;
+  const previewRun = view === 'history' && previewRunID ? execution?.runs?.find(item => item.id === previewRunID) : undefined;
 
   useEffect(() => {
     if (!token || !activeRunID) return;
@@ -249,7 +251,21 @@ export default function Console() {
     setProject(input.id);
   }
 
-  function selectRun(id: string) { setRun(undefined); setEvents([]); setRunID(id); }
+  function selectRun(id: string) {
+    if (id && id === runID) {
+      document.getElementById('run-result')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      return;
+    }
+    setRun(undefined); setEvents([]); setRunID(id); setPreviewRunID('');
+  }
+
+  function runActions(item: Run) {
+    const preview = previewLabel(item.result?.artifacts);
+    return <>
+      {preview && <button className="preview-action" aria-haspopup="dialog" onClick={() => setPreviewRunID(item.id)}>{preview}</button>}
+      <button onClick={() => selectRun(item.id)}>查看日志</button>
+    </>;
+  }
 
   function selectHistoryProject(id: string, execution = '') {
     setHistoryProject(id); setHistory(undefined); setExecutionID(execution); selectRun('');
@@ -559,8 +575,9 @@ export default function Console() {
                 <span>CI 构建 <code title={qaBuild.result?.commit}>{qaBuild.result?.commit?.slice(0, 7)}</code> · 测试版</span>
               </div>}
               {history.length > 0 && <details><summary>历史尝试</summary><div className="run-attempts">{history.map(previous => <div key={previous.id}>
-                <button onClick={() => { if (previous.id !== runID) selectRun(previous.id); }}>第 {previous.attempt ?? 1} 次 · {runStatus(previous.status, previous.result?.detail)} · {resultLabel(previous.result?.artifacts)}</button>
+                <p>第 {previous.attempt ?? 1} 次 · {runStatus(previous.status, previous.result?.detail)}</p>
                 <RunTiming run={previous} now={now} />
+                <div className="actions">{runActions(previous)}</div>
               </div>)}</div></details>}
               {Boolean(current?.result?.bugs?.length) && <p>{current.result?.bugs?.length} 张 QA 缺陷单</p>}
               {execution.qa_tickets?.[step.id]?.length ? <QAReview key={reviewed?.id} tickets={execution.qa_tickets[step.id]}
@@ -571,25 +588,29 @@ export default function Console() {
                   setHistory(h => h?.detail?.id === detail.id ? { ...h, detail, executions: h.executions.map(item => item.id === detail.id ? detail : item) } : h);
                 })} /> : null}
               {repairs.length > 0 && <details><summary>{step.qa_rework ? '缺陷返工记录' : 'CI 失败处理记录'}</summary><div className="run-attempts">{repairs.map(repair => <div key={repair.id}>
-                <button onClick={() => { if (repair.id !== runID) selectRun(repair.id); }}>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</button>
+                <p>{repair.spec.title} · {executorName(repair.spec.executor)} · {runStatus(repair.status, repair.result?.detail)} · 第 {repair.attempt ?? 1} 次</p>
                 <RunTiming run={repair} now={now} />
+                <div className="actions">{runActions(repair)}</div>
               </div>)}</div></details>}
             </div><div className="actions">
-              {current && <button onClick={() => { if (current.id !== runID) selectRun(current.id); }}>{resultLabel(current.result?.artifacts)}</button>}
+              {current && runActions(current)}
               {ready && <button className="primary" disabled={busy} onClick={() => void action(async () => { await api(token, `/executions/${execution.id}/approve/${step.id}`, {}); })}>确认步骤</button>}
             </div></li>;
           })}</ol></>}
-          {run && <article id="run-result" className="run-detail"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
+          {previewRun?.result?.artifacts?.some(isPreview) && <RunPreviewDialog key={previewRun.id}
+            title={previewRun.spec.title} runID={previewRun.id} artifacts={previewRun.result.artifacts} token={token} onClose={() => setPreviewRunID('')} />}
+          {run && <article id="run-result" className="run-detail" aria-label="运行日志"><div className="line"><h3>{run.spec.title} · {runStatus(run.status, run.result?.detail)}{run.attempt && ` · 第 ${run.attempt} 次`}</h3>{['queued', 'claimed', 'running'].includes(run.status) && <button disabled={busy} onClick={() => void action(async () => { await api(token, `/runs/${run.id}/cancel`, {}); })}>取消执行</button>}</div>
             <RunTiming run={run} now={now} />
             {run.result && <p>{run.result.detail === 'Execution timed out' ? '执行超时' : run.result.detail}{run.result.commit && <><br />Git 提交 <code>{run.result.commit}</code></>}</p>}
             {Boolean(run.result?.bugs?.length) && <section aria-label="QA 缺陷单"><h4>QA 缺陷单</h4><ol>{run.result?.bugs?.map((bug, i) => <li key={i}><strong>{execution?.runs?.find(r => r.id === run.id)?.result?.bugs?.[i]?.id || bug.id || `QA-${run.id.slice(0, 7)}-${i + 1}`} · {bug.title}</strong>
               <p>负责角色　{qaRoles[bug.owner] || bug.owner}</p>
               <p>复现　{bug.steps}</p><p>预期　{bug.expected}</p><p>实际　{bug.actual}</p>
             </li>)}</ol></section>}
-            {run.result?.artifacts?.some(isPreview) && <RunPreviews key={run.id} runID={run.id} artifacts={run.result.artifacts} token={token} />}
             {run.result?.artifacts?.some(item => !isPreview(item) && !item.name.endsWith('.log')) &&
               <ul>{run.result.artifacts.filter(item => !isPreview(item) && !item.name.endsWith('.log')).map(item => <li key={item.name}><button disabled={busy} onClick={() => void action(() => downloadArtifact(run.id, item.name))}>下载 {item.name}</button> <span title={item.sha256}>{Math.ceil(item.bytes / 1024)} KB</span></li>)}</ul>}
-            {events.filter(event => event.kind === 'error').map(event => <p className="result-error" key={event.seq}>{event.text}</p>)}
+            {events.some(event => ['status', 'test', 'error'].includes(event.kind)) &&
+              <ol className="summary-events">{events.filter(event => ['status', 'test', 'error'].includes(event.kind)).map(event =>
+                <li key={event.seq} data-kind={event.kind}>{event.text}</li>)}</ol>}
             {events.some(event => event.kind === 'qa') && <details><summary>QA 验收报告</summary><pre className="report-text">{events.filter(event => event.kind === 'qa').map(event => event.text).join('\n')}</pre></details>}
           </article>}
         </section>
