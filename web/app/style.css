@@ -198,6 +198,8 @@ fieldset .text-button{margin-top:6px;padding-left:0}
 .run-attempts{display:grid;gap:10px;margin-top:8px}
 .run-attempts button{white-space:normal;text-align:left}
 .preview-action{color:var(--mint-2);border-color:var(--good-bd)}
+.agent-check{margin-top:4px}
+.agent-check button{padding:5px 10px;font-size:12.5px}
 .qa-preview{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:10px}
 .qa-preview span{color:var(--muted);font-size:12.5px}
 

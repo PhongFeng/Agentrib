@@ -20,7 +20,7 @@ var schema string
 
 const leaseInterval = "interval '45 seconds'"
 const runColumns = "id, spec, status, lease, created, updated, started_at, finished_at, result, execution_id, step_id, attempt"
-const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review"
+const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review,can_check_agents"
 
 var ErrConflict = errors.New("run state or lease changed")
 
@@ -97,7 +97,7 @@ func (s *Store) AuthRunner(ctx context.Context, token string) (string, error) {
 
 func scanMachine(row pgx.Row) (protocol.Machine, error) {
 	var m protocol.Machine
-	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow, &m.WorkflowReview)
+	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow, &m.WorkflowReview, &m.CanCheckAgents)
 	return m, err
 }
 
@@ -140,8 +140,8 @@ func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Hear
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,
-		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,workflow_review=$10,seen=now() WHERE id=$1`,
-		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow, h.WorkflowReview); err != nil {
+		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,workflow_review=$10,can_check_agents=$11,seen=now() WHERE id=$1`,
+		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow, h.WorkflowReview, h.CanCheckAgents); err != nil {
 		return reply, err
 	}
 	if h.CreateProjects {
@@ -154,8 +154,11 @@ func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Hear
 }
 
 func (s *Store) expire(ctx context.Context) error {
-	_, err := s.db.Exec(ctx, `UPDATE runs SET status='lost',updated=now(),finished_at=lease_expires,result='{"status":"lost","detail":"Runner lease expired"}'
-		WHERE status IN ('claimed','running','canceling') AND lease_expires <= now()`)
+	_, err := s.db.Exec(ctx, `UPDATE runs SET status='lost',updated=now(),finished_at=coalesce(lease_expires,now()),
+		result=CASE WHEN status='queued' THEN '{"status":"lost","detail":"排队超时，尚未调用模型"}'::jsonb
+			ELSE '{"status":"lost","detail":"Runner lease expired"}'::jsonb END
+		WHERE (status IN ('claimed','running','canceling') AND lease_expires <= now())
+		OR (status='queued' AND spec->>'agent_check'='true' AND created<=now()-interval '5 minutes')`)
 	return err
 }
 
@@ -206,7 +209,8 @@ func (s *Store) Runs(ctx context.Context, executionID string) ([]protocol.Run, e
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+runColumns+` FROM runs
-		WHERE ($1='' OR execution_id=$1) AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=runs.execution_id AND e.archived)
+		WHERE ($1='' OR execution_id=$1) AND NOT (spec ? 'agent_check')
+		AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=runs.execution_id AND e.archived)
 		ORDER BY created DESC,id LIMIT 200`, executionID)
 	if err != nil {
 		return nil, err
@@ -260,8 +264,10 @@ func (s *Store) Claim(ctx context.Context, machine string) (*protocol.Run, error
 		WHERE id=(SELECT r.id FROM runs r JOIN machines m ON m.id=r.machine_id
 		WHERE r.machine_id=$1 AND r.status='queued' AND m.seen > now()-`+leaseInterval+`
 		AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=r.execution_id AND e.archived)
-		AND r.spec->>'executor'=ANY(m.executors) AND r.spec->>'project'=ANY(m.projects)
-		AND coalesce(r.spec->>'engine','godot')=coalesce(m.project_engines->>(r.spec->>'project'),'godot')
+		AND r.spec->>'executor'=ANY(m.executors)
+		AND (CASE WHEN r.spec ? 'agent_check' THEN m.can_check_agents
+			ELSE r.spec->>'project'=ANY(m.projects)
+			AND coalesce(r.spec->>'engine','godot')=coalesce(m.project_engines->>(r.spec->>'project'),'godot') END)
 		AND (coalesce(r.spec->>'brief_mode','')='' OR m.brief_chat)
 		AND (NOT (r.spec ?| ARRAY['merge_commits','qa_gate','export_game']) OR m.production_workflow)
 		AND (NOT (r.spec ?| ARRAY['preflight','qa_rework','recheck_of']) OR m.workflow_review)

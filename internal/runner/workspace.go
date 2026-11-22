@@ -66,6 +66,9 @@ func executionBase(ctx context.Context, repository, execution string) (string, e
 
 func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protocol.Result, error) {
 	var result protocol.Result
+	if run.Spec.AgentCheck {
+		return result, r.checkAgent(ctx, run.Spec.Executor)
+	}
 	project, exists := r.cfg.Projects[run.Spec.Project]
 	if !exists {
 		project, exists = r.managedProject(run.Spec.Project)

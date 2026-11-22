@@ -8,7 +8,7 @@ import { isPreview, previewLabel, RunPreviewDialog, type Artifact } from './run-
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
-type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; seen: string };
+type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; can_check_agents?: boolean; seen: string };
 type ProjectInput = { id: string; name: string; engine: string };
 type Project = ProjectInput & { workspace?: string; status: 'ready' | 'pending' | 'failed' | 'unavailable'; error?: string };
 type Engine = { id: string; name: string; implemented: boolean };
@@ -65,6 +65,19 @@ function runStatus(status: string, detail?: string) {
   return label[status] || status;
 }
 
+function agentCheckStatus(run: Run) {
+  const detail = run.result?.detail;
+  switch (run.status) {
+    case 'queued': return '排队等待 Runner';
+    case 'claimed':
+    case 'running': return '正在测试模型响应…';
+    case 'succeeded': return '模型已响应';
+    case 'failed': return `测试失败 · ${detail === 'Execution timed out' ? '请求超时' : detail || '模型调用失败'}`;
+    case 'lost': return detail === 'Runner lease expired' ? 'Runner 已失联' : detail || '测试未完成';
+    default: return runStatus(run.status);
+  }
+}
+
 const goodTones = new Set(['在线', 'CLI 已就绪', '额度可用', '已登录', '工作区就绪', '已通过', '已通知']);
 const warnTones = new Set(['本轮验收未通过', '额度受限', '需要认证', '等待确认', '等待依赖', '排队', '已领取', '等待创建工作区', 'CLI 未就绪']);
 const badTones = new Set(['离线', '失败', '失联', '执行超时', '工作区创建失败', '工作区暂不可用']);
@@ -110,6 +123,7 @@ export default function Console() {
   const [machines, setMachines] = useState<Machine[]>();
   const [engines, setEngines] = useState<Engine[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentChecks, setAgentChecks] = useState<Run[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState('');
@@ -135,14 +149,18 @@ export default function Console() {
     async function refresh() {
       try {
         const [inventory, catalog, agentCatalog, w] = await Promise.all([
-          api<Machine[]>(token, '/machines').then(async machines => ({
-            machines,
-            projects: machines.length === 1 ? await api<Project[]>(token, '/machines/' + machines[0].id + '/projects') : [],
-          })),
+          api<Machine[]>(token, '/machines').then(async machines => {
+            const single = machines.length === 1 ? machines[0] : undefined;
+            const [projects, checks] = await Promise.all([
+              single ? api<Project[]>(token, `/machines/${single.id}/projects`) : [],
+              single?.can_check_agents ? api<Run[]>(token, `/machines/${single.id}/agent-checks`) : [],
+            ]);
+            return { machines, projects, checks };
+          }),
           api<Engine[]>(token, '/engines'), api<Agent[]>(token, '/agents'), api<Workflow[]>(token, '/workflows'),
         ]);
         if (disposed) return;
-        setMachines(inventory.machines); setProjects(inventory.projects);
+        setMachines(inventory.machines); setProjects(inventory.projects); setAgentChecks(inventory.checks);
         setEngines(catalog); setAgents(agentCatalog); setWorkflows(w);
       } catch (error) {
         if (!disposed) setNotice((error as Error).message);
@@ -240,7 +258,7 @@ export default function Console() {
   function logOut() {
     sessionStorage.removeItem('agentrib.operator');
     clearBriefChats();
-    setToken(''); setDraft(undefined); setMachines(undefined); setEngines([]); setAgents([]); setWorkflows([]);
+    setToken(''); setDraft(undefined); setMachines(undefined); setEngines([]); setAgents([]); setWorkflows([]); setAgentChecks([]);
     setProjects([]); setProjectDraft(undefined); setProject('');
     setBrief(''); setView('workbench'); selectHistoryProject('');
   }
@@ -372,11 +390,22 @@ export default function Console() {
                   const ready = machine.executors.includes(agent.id);
                   const account = status?.account ? agentAccountLabel[status.account] : '';
                   const availability = !ready ? 'CLI 未就绪' : account || 'CLI 已就绪';
+                  const check = agentChecks.find(run => run.spec.executor === agent.id);
+                  const checking = check && ['queued', 'claimed', 'running', 'canceling'].includes(check.status);
                   return <li key={agent.id}>
                     <div className="line"><strong>{agent.name}</strong><span className={'state ' + tone(availability)}>{availability}</span></div>
                     {status?.quotas?.length ? <ul className="agent-quotas">{status.quotas.map((quota, index) => <li key={index}>
                       {quotaText(quota)}{quota.resets_at ? ' · ' + new Date(quota.resets_at * 1000).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' }) + ' 重置' : ''}
-                    </li>)}</ul> : <p>额度未知</p>}
+                    </li>)}</ul> : <>
+                      <div className="line agent-check"><p>额度未知</p><button
+                        disabled={busy || checking || !ready || !machineOnline || !machine.can_check_agents}
+                        title={machine.can_check_agents ? '发送一次短模型请求，可能消耗少量额度' : '更新 Runner 后可测试'}
+                        onClick={() => void action(async () => {
+                          const started = await api<Run>(token, `/machines/${machine.id}/agent-checks`, { executor: agent.id });
+                          setAgentChecks(current => [...current.filter(run => run.spec.executor !== agent.id), started]);
+                        })}>测试可用性</button></div>
+                      {check && <p role="status">{agentCheckStatus(check)}{check.finished_at && <> · <time dateTime={check.finished_at}>{runDate.format(new Date(check.finished_at))}</time></>}</p>}
+                    </>}
                   </li>;
                 })}</ul>}
               </section>

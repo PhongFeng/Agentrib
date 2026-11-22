@@ -37,6 +37,8 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/machines", a.asOperator(a.machines))
 	mux.HandleFunc("POST /api/v1/machines", a.asOperator(a.enroll))
+	mux.HandleFunc("GET /api/v1/machines/{id}/agent-checks", a.asOperator(a.agentChecks))
+	mux.HandleFunc("POST /api/v1/machines/{id}/agent-checks", a.asOperator(a.checkAgent))
 	mux.HandleFunc("GET /api/v1/machines/{id}/projects", a.asOperator(a.projects))
 	mux.HandleFunc("POST /api/v1/machines/{id}/projects", a.asOperator(a.createProject))
 	mux.HandleFunc("GET /api/v1/machines/{id}/projects/{project}/commits", a.asOperator(a.projectCommits))
@@ -202,7 +204,7 @@ func validSpec(spec protocol.Spec) bool {
 	engine, known := protocol.FindEngine(protocol.EngineID(spec.Engine))
 	agent, usesAgent := protocol.FindAgent(spec.Executor)
 	return idPattern.MatchString(spec.MachineID) && slugPattern.MatchString(spec.Project) && validExecutor(spec.Executor) &&
-		spec.BriefMode == "" && spec.RepairOf == "" && spec.QADispatch == "" && spec.RecheckOf == "" && !spec.Preflight && !spec.QARework &&
+		spec.BriefMode == "" && spec.RepairOf == "" && spec.QADispatch == "" && spec.RecheckOf == "" && !spec.Preflight && !spec.QARework && !spec.AgentCheck &&
 		len(spec.MergeCommits) == 0 && !spec.QAGate && !spec.ExportGame &&
 		known && engine.Implemented && (usesAgent || spec.Executor == engine.ID) &&
 		(!spec.ReadOnly || agent.ReadOnly) &&

@@ -14,6 +14,7 @@ ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_statuses jsonb NOT NULL DEFA
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS brief_chat boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS production_workflow boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS workflow_review boolean NOT NULL DEFAULT false;
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS can_check_agents boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS game_projects (
     machine_id text NOT NULL REFERENCES machines(id),
@@ -42,6 +43,8 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 CREATE INDEX IF NOT EXISTS runs_claim ON runs (machine_id, created, id) WHERE status = 'queued';
+CREATE INDEX IF NOT EXISTS runs_agent_checks ON runs (machine_id, (spec->>'executor'), created DESC, id DESC)
+    WHERE spec->>'agent_check'='true';
 
 ALTER TABLE runs
     ADD COLUMN IF NOT EXISTS started_at timestamptz,

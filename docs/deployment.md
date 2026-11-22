@@ -36,6 +36,8 @@ DeepSeek Harness 使用支持 `--profile headless` 的版本。使用 DeepSeek �
 
 执行机器卡片显示已安装的 Agent、CLI 状态和可查询的额度。Codex 通过本机 App Server 读取 ChatGPT 用量窗口。DeepSeek Harness 配置了 Runner 环境变量 `DEEPSEEK_API_KEY` 时，可通过 DeepSeek 官方 API 读取余额。Qoder CN 使用 CLI 的 JSON 状态查询登录情况，Credits 可在 Qoder CN 交互界面查看。
 
+额度未知的 Agent 可以点「测试可用性」。Runner 在临时目录发送一次短模型请求，执行机器卡片显示最近测试结果和时间。
+
 ## 引擎适配
 
 工作流版本保存 `engine`。测试与导出步骤使用通用的 `engine` 执行方式，派单时解析为该版本选定的引擎。Runner 上报项目、引擎和 Git 工作区路径，项目引擎和工作流引擎一致时可派单。较早的工作流与 Runner 项目配置默认使用 Godot，`godot_dir` 仍可作为旧项目的目录字段。手动登记的项目使用 `engine` 和可选的 `engine_dir`。

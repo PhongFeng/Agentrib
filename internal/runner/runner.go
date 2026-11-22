@@ -54,7 +54,7 @@ func New(cfg Config) *Runner {
 }
 
 func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
-	h := protocol.Heartbeat{Executors: []string{}, AgentStatuses: make(map[string]protocol.AgentStatus), BriefChat: true, ProductionWorkflow: true, WorkflowReview: true}
+	h := protocol.Heartbeat{Executors: []string{}, AgentStatuses: make(map[string]protocol.AgentStatus), BriefChat: true, ProductionWorkflow: true, WorkflowReview: true, CanCheckAgents: true}
 	_, gitErr := findCommand("", "git")
 	h.CreateProjects = gitErr == nil
 	r.updateProjects(&h)
@@ -276,7 +276,9 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 	}
 	logs := &eventBuffer{secret: r.cfg.token}
 	duration := maxJobDuration
-	if job.ExecutionID != "" {
+	if job.Spec.AgentCheck {
+		duration = agentCheckDuration
+	} else if job.ExecutionID != "" {
 		duration = workflowJobDuration
 	}
 	worker, cancel := context.WithTimeout(ctx, duration)
@@ -300,6 +302,9 @@ func (r *Runner) runOnce(ctx context.Context, job protocol.Run) {
 			logs.add("qa", result.Detail)
 		case err != nil:
 			result.Status, result.Detail = "failed", "Execution failed; see events"
+			if job.Spec.AgentCheck {
+				result.Detail = err.Error()
+			}
 			logs.add("error", err.Error())
 		default:
 			result.Status, result.Detail = "succeeded", "Execution completed"

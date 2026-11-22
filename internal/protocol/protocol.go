@@ -13,6 +13,7 @@ type Machine struct {
 	BriefChat          bool                   `json:"brief_chat,omitempty"`
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
+	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
 	Seen               time.Time              `json:"seen"`
 }
 
@@ -31,6 +32,7 @@ type Heartbeat struct {
 	BriefChat          bool                   `json:"brief_chat,omitempty"`
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
+	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
 	ProjectResult      *ProjectResult         `json:"project_result,omitempty"`
 }
 
@@ -44,6 +46,7 @@ type Spec struct {
 	Commit       string   `json:"commit,omitempty"`
 	ReadOnly     bool     `json:"read_only,omitempty"`
 	BriefMode    string   `json:"brief_mode,omitempty"`
+	AgentCheck   bool     `json:"agent_check,omitempty"`
 	MergeCommits []string `json:"merge_commits,omitempty"`
 	QAGate       bool     `json:"qa_gate,omitempty"`
 	ExportGame   bool     `json:"export_game,omitempty"`
