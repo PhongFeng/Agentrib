@@ -9,7 +9,8 @@ import { isPreview, previewLabel, RunPreviewDialog, type Artifact } from './run-
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
-type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; can_check_agents?: boolean; godot_mcp?: 'ready' | 'unavailable'; godot_mcp_agents?: string[]; seen: string };
+type ToolStatus = { status: 'ready' | 'unavailable' | 'unconfigured'; agents?: string[] };
+type Machine = { tools?: Record<string, ToolStatus>; id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; can_check_agents?: boolean; godot_mcp?: 'ready' | 'unavailable'; godot_mcp_agents?: string[]; seen: string };
 type ProjectInput = { id: string; name: string; engine: string };
 type Project = ProjectInput & { workspace?: string; status: 'ready' | 'pending' | 'failed' | 'unavailable'; error?: string };
 type Engine = { id: string; name: string; implemented: boolean };
@@ -203,6 +204,7 @@ export default function Console() {
   const machine = machines?.length === 1 ? machines[0] : undefined;
   const machineOnline = !!machine && Date.now() - new Date(machine.seen).getTime() < 45000;
   const machineAgents = agents.filter(agent => machine?.agent_statuses?.[agent.id] || machine?.executors.includes(agent.id));
+  const machineTools = Object.entries(machine?.tools || {});
   const machineEngines = engines.filter(engine => machine?.executors.includes(engine.id));
   const machineID = machine?.id;
   const selectedProject = projects.find(item => item.id === project);
@@ -403,7 +405,7 @@ export default function Console() {
               <strong>{machine.name}</strong>
               <span className={'state ' + (machineOnline ? 'good' : 'bad')}>{machineOnline ? '在线' : '离线'}</span>
             </div>
-            {!machineOnline && (machineAgents.length > 0 || machineEngines.length > 0) && <p>以下为 Runner 上次上报的信息。</p>}
+            {!machineOnline && (machineAgents.length > 0 || machineEngines.length > 0 || machineTools.length > 0) && <p>以下为 Runner 上次上报的信息。</p>}
             <div className="machine-capabilities">
               <section aria-labelledby="machine-agents">
                 <h3 id="machine-agents">已安装的 Agent</h3>
@@ -442,6 +444,17 @@ export default function Console() {
                     ? ' · 开发 Agent ' + machine.godot_mcp_agents.map(executorName).join('、')
                     : ''}</p>}
                 </li>)}</ul> : <p>暂无引擎记录</p>}
+              </section>
+              <section aria-labelledby="machine-tools">
+                <h3 id="machine-tools">工具</h3>
+                {machineTools.length ? <ul className="machine-inventory">{machineTools.map(([id, tool]) => <li key={id}>
+                  <div className="line"><strong>{id === 'blender' ? 'Blender' : id}</strong><span className={'state ' + (!machineOnline ? 'bad' : tool.status === 'ready' ? 'good' : 'warn')}>
+                    {!machineOnline ? 'Runner 离线' : tool.status === 'ready' ? 'MCP 已接入' : tool.status === 'unavailable' ? '连接失败' : '未配置'}
+                  </span></div>
+                  {id === 'blender' && <p>3D 建模 · GLB 导出</p>}
+                  {machineOnline && tool.status === 'ready' && <p>{tool.agents?.length
+                    ? '可用 Agent · ' + tool.agents.map(executorName).join('、') : '暂无可用 Agent'}</p>}
+                </li>)}</ul> : <p>Runner 尚未上报工具</p>}
               </section>
             </div>
           </article> : <p>{!machines ? '正在读取执行机器…' : machines.length === 0

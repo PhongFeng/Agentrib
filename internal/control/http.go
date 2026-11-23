@@ -294,6 +294,18 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 		problem(w, http.StatusBadRequest, "Invalid Godot MCP status")
 		return
 	}
+	for id, tool := range h.Tools {
+		if id != "blender" || !slices.Contains([]string{"ready", "unavailable", "unconfigured"}, tool.Status) {
+			problem(w, http.StatusBadRequest, "Invalid tool status")
+			return
+		}
+		for i, agent := range tool.Agents {
+			if tool.Status != "ready" || !slices.Contains(protocol.WorkspaceMCPAgents, agent) || !slices.Contains(h.Executors, agent) || slices.Contains(tool.Agents[:i], agent) {
+				problem(w, http.StatusBadRequest, "Invalid tool agent")
+				return
+			}
+		}
+	}
 	mcpAgents := make(map[string]bool)
 	for _, key := range h.GodotMCPAgents {
 		_, known := protocol.FindAgent(key)

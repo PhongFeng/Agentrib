@@ -55,6 +55,33 @@ func integrationStore(t *testing.T) (context.Context, *Store, string) {
 	return ctx, db, databaseURL
 }
 
+func TestMachineModelingToolInventory(t *testing.T) {
+	ctx, db, _ := integrationStore(t)
+	enrollment, err := db.Enroll(ctx, "modeling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := protocol.Heartbeat{Executors: []string{"codex"}, Projects: []string{}, Tools: map[string]protocol.ToolStatus{
+		"blender": {Status: "ready", Agents: []string{"codex"}},
+	}}
+	for _, legacy := range []bool{false, true} {
+		if legacy {
+			h.Tools = nil
+		}
+		if err := db.Heartbeat(ctx, enrollment.Machine.ID, h); err != nil {
+			t.Fatal(err)
+		}
+		machines, err := db.Machines(ctx)
+		if err != nil || len(machines) != 1 {
+			t.Fatalf("machine inventory: %v, %v", machines, err)
+		}
+		tool, present := machines[0].Tools["blender"]
+		if legacy && present || !legacy && (tool.Status != "ready" || len(tool.Agents) != 1 || tool.Agents[0] != "codex") {
+			t.Fatalf("legacy=%t, tools=%v", legacy, machines[0].Tools)
+		}
+	}
+}
+
 func TestLeaseCancellationAndReplay(t *testing.T) {
 	ctx, db, url := integrationStore(t)
 	enrollment, err := db.Enroll(ctx, "test machine")

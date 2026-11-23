@@ -42,6 +42,29 @@ DeepSeek Harness 使用支持 `--profile headless` 的版本。使用 DeepSeek �
 
 额度未知的 Agent 可以点「测试可用性」。Runner 在临时目录发送一次短模型请求，执行机器卡片显示最近测试结果和时间。
 
+## Blender 建模工具
+
+在执行机器为 Runner 准备 Blender 4.5 LTS 和独立的 Python 3.12 环境。以下命令从仓库根目录运行。上游包同时包含 MCP 服务和匹配版本的 Blender 插件。[Blender MCP 上游说明](https://github.com/ahujasid/mcp-for-blender)
+
+```sh
+tool="$HOME/.agentrib/tools/blender"
+mkdir -p "$tool"
+uv venv --python 3.12 "$tool/env"
+uv pip install --python "$tool/env/bin/python" 'mcp-for-blender==2.3.1'
+cp deploy/blender_mcp.py "$tool/adapter.py"
+"$tool/env/bin/mcp-for-blender" install-addon
+cat > "$tool/agentrib-blender" <<'SH'
+#!/bin/sh
+tool_dir=$(dirname "$0")
+exec "$tool_dir/env/bin/python" -I "$tool_dir/adapter.py" "$@"
+SH
+chmod +x "$tool/agentrib-blender"
+```
+
+在 Blender 的插件设置启用 MCP for Blender，打开 3D 视图的 MCP 面板并确认服务已启动。保持 Blender 在执行机器的图形会话中运行。插件默认监听本机端口 9876；部署独立 Blender 实例时，可在启动脚本设置 `BLENDER_PORT` 与插件端口一致。在 Runner 配置的 `commands["blender-mcp"]` 填入 `agentrib-blender` 的绝对路径，执行 `agentrib-blender --check` 验证服务与插件能读取 Blender 版本。Runner 每分钟重新探测，工作台「执行机器 → 工具」显示最近连接结果和可用 Agent。
+
+美术、开发及相应返工步骤可使用 Codex、Qoder CN 或 MiniMax Code。简报可写「用 Blender 制作一个低多边形宝箱，在游戏场景中引用它」。Agent 的 `create_model` 工具接受基础几何体、自定义网格、变换与颜色，导出到本次工作区的 `assets/models/<文件名>.glb`。同名导出会在验证新文件后替换旧模型。模型随步骤的 Git 提交交给下游。
+
 ## 引擎适配
 
 Godot MCP 可选用 Coding-Solo 的 `@coding-solo/godot-mcp@0.1.1`。安装 Node.js 18+，在独立工具目录安装固定版本并关闭 npm 安装脚本，再创建一个可执行启动脚本来调用该包的 `build/index.js`。把脚本的绝对路径填入 Runner 的 `commands["godot-mcp"]`。Runner 使用同一份 `commands.godot` 探测 MCP。

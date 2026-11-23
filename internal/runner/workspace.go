@@ -160,25 +160,36 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 			backend = qoder
 		}
 	}
-	godotPrompt := ""
-	godot, isGodot := adapter.(godotEngine)
-	if isGodot && r.godotMCPAgents[run.Spec.Executor] && !run.Spec.ReadOnly && !run.Spec.QAGate &&
-		!brief && (run.StepID == "develop" || run.Spec.Preflight) {
-		if session, err := godotMCPForWorkspace(r.cfg.Commands["godot-mcp"], godot.command, dir); err == nil {
-			switch agent := backend.(type) {
-			case Codex:
-				agent.mcpOptions = session.codexOptions()
-				backend, godotPrompt = agent, godotMCPPrompt
-			case QoderCN:
-				agent.mcp = session
-				backend = agent
-			case MiniMaxCode:
-				agent.mcp = session
-				backend = agent
-			}
-		} else {
+	servers := mcpServers{}
+	writable := !run.Spec.ReadOnly && !run.Spec.QAGate && !brief && !run.IsProductTriage()
+	develop := run.StepID == "develop" || run.Spec.Preflight
+	if godot, ok := adapter.(godotEngine); ok && writable && develop && r.godotMCPAgents[run.Spec.Executor] {
+		session, err := godotMCPForWorkspace(r.cfg.Commands["godot-mcp"], godot.command, dir)
+		if err != nil {
 			emit("diagnostic", "Godot MCP: "+err.Error())
+		} else {
+			servers[godotMCPName] = session
 		}
+	}
+	modeling := develop || run.StepID == "art" || strings.HasSuffix(run.StepID, ":fix:art") || strings.HasSuffix(run.StepID, ":fix:develop")
+	if writable && modeling && r.blenderReady.Load() {
+		servers[blenderMCPName] = mcpServer{Command: r.cfg.Commands["blender-mcp"], Args: []string{"--workspace", dir}}
+	}
+	mcpPrompt := ""
+	switch agent := backend.(type) {
+	case Codex:
+		for _, name := range []string{godotMCPName, blenderMCPName} {
+			if s, ok := servers[name]; ok {
+				agent.mcpOptions = append(agent.mcpOptions, s.codexOptions(name)...)
+			}
+		}
+		backend, mcpPrompt = agent, servers.prompt()
+	case QoderCN:
+		agent.mcp = servers
+		backend = agent
+	case MiniMaxCode:
+		agent.mcp = servers
+		backend = agent
 	}
 	var finalReply string
 	if run.IsProductTriage() {
@@ -199,7 +210,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		} else if run.Spec.QARework {
 			mode = "Review the exact CI revision in a disposable worktree. Temporary untracked test files are allowed. Do not modify tracked files or make commits."
 		}
-		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt + godotPrompt
+		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt + mcpPrompt
 		if run.Spec.QAGate {
 			if run.Spec.WebBuild != nil {
 				browser, err := r.prepareQABrowser(ctx, *run.Spec.WebBuild)

@@ -2,6 +2,13 @@ package protocol
 
 import "time"
 
+var WorkspaceMCPAgents = []string{"codex", "qoder-cn", "minimax-code"}
+
+type ToolStatus struct {
+	Status string   `json:"status"`
+	Agents []string `json:"agents,omitempty"`
+}
+
 type Machine struct {
 	ID                 string                 `json:"id"`
 	Name               string                 `json:"name"`
@@ -14,6 +21,7 @@ type Machine struct {
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
+	Tools              map[string]ToolStatus  `json:"tools,omitempty"`
 	GodotMCP           string                 `json:"godot_mcp,omitempty"`
 	GodotMCPAgents     []string               `json:"godot_mcp_agents,omitempty"`
 	Seen               time.Time              `json:"seen"`
@@ -35,6 +43,7 @@ type Heartbeat struct {
 	ProductionWorkflow bool                   `json:"production_workflow,omitempty"`
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
+	Tools              map[string]ToolStatus  `json:"tools,omitempty"`
 	GodotMCP           string                 `json:"godot_mcp,omitempty"`
 	GodotMCPAgents     []string               `json:"godot_mcp_agents,omitempty"`
 	ProjectResult      *ProjectResult         `json:"project_result,omitempty"`

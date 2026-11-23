@@ -25,32 +25,34 @@ const godotTools = `{"tools":[
 const godotMCPName = "agentrib_godot"
 const godotMCPPrompt = "\nUse the agentrib_godot tools to run the current project or a specific scene, read its runtime output, and stop it when done."
 
-type godotMCPServer struct {
+type mcpServers map[string]mcpServer
+
+type mcpServer struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 }
 
-func godotMCPForWorkspace(tool, godot, dir string) (godotMCPServer, error) {
+func godotMCPForWorkspace(tool, godot, dir string) (mcpServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return godotMCPServer{}, err
+		return mcpServer{}, err
 	}
-	return godotMCPServer{Command: exe, Args: []string{"-godot-mcp", tool, "-godot-engine", godot, "-godot-project", dir}}, nil
+	return mcpServer{Command: exe, Args: []string{"-godot-mcp", tool, "-godot-engine", godot, "-godot-project", dir}}, nil
 }
 
-func (s godotMCPServer) codexOptions() []string {
+func (s mcpServer) codexOptions(name string) []string {
 	args, _ := json.Marshal(s.Args)
-	const key = "mcp_servers." + godotMCPName + "."
+	key := "mcp_servers." + name + "."
 	return []string{"-c", key + "command=" + strconv.Quote(s.Command), "-c", key + "args=" + string(args),
 		"-c", key + `default_tools_approval_mode="approve"`}
 }
 
-func (s godotMCPServer) qoderConfig() string {
-	data, _ := json.Marshal(map[string]map[string]godotMCPServer{"mcpServers": {godotMCPName: s}})
+func (s mcpServers) qoderConfig() string {
+	data, _ := json.Marshal(map[string]mcpServers{"mcpServers": s})
 	return string(data)
 }
 
-func (s godotMCPServer) miniMaxConfig(dir string) (func() error, error) {
+func (s mcpServers) miniMaxConfig(dir string) (func() error, error) {
 	path := filepath.Join(dir, ".mcp.json")
 	document := map[string]json.RawMessage{}
 	servers := map[string]json.RawMessage{}
@@ -73,7 +75,9 @@ func (s godotMCPServer) miniMaxConfig(dir string) (func() error, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	servers[godotMCPName], _ = json.Marshal(s)
+	for name, server := range s {
+		servers[name], _ = json.Marshal(server)
+	}
 	document["mcpServers"], _ = json.Marshal(servers)
 	data, _ := json.Marshal(document)
 	if err := writeMCPConfig(path, data, 0600); err != nil {

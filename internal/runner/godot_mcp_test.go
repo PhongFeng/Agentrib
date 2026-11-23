@@ -17,13 +17,13 @@ func TestMiniMaxGodotMCPLocalConfigIsRestored(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		server := godotMCPServer{Command: "agentrib-runner", Args: []string{"-godot-project", project}}
+		server := mcpServers{godotMCPName: {Command: "agentrib-runner", Args: []string{"-godot-project", project}}, blenderMCPName: {Command: "blender-tool"}}
 		cleanup, err := server.miniMaxConfig(project)
 		if err != nil {
 			t.Fatal(err)
 		}
 		during, err := os.ReadFile(config)
-		if err != nil || !bytes.Contains(during, []byte(godotMCPName)) ||
+		if err != nil || !bytes.Contains(during, []byte(godotMCPName)) || !bytes.Contains(during, []byte(blenderMCPName)) ||
 			original != "" && !bytes.Contains(during, []byte(`"other"`)) {
 			t.Fatalf("temporary MCP config: %q, error: %v", during, err)
 		}

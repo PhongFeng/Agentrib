@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -36,6 +37,7 @@ type Runner struct {
 	engines        map[string]engineAdapter
 	agentPaths     map[string]string
 	godotMCPAgents map[string]bool
+	blenderReady   atomic.Bool
 }
 
 var errLease = errors.New("run lease no longer active")
@@ -108,7 +110,7 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 				slog.Info("Godot MCP probe failed", "error", err)
 			} else {
 				h.GodotMCP = "ready"
-				for _, key := range []string{"codex", "qoder-cn", "minimax-code"} {
+				for _, key := range protocol.WorkspaceMCPAgents {
 					if r.backends[key] != nil {
 						r.godotMCPAgents[key] = true
 						h.GodotMCPAgents = append(h.GodotMCPAgents, key)
@@ -117,6 +119,7 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 			}
 		}
 	}
+	h.Tools = map[string]protocol.ToolStatus{"blender": r.probeBlender(ctx)}
 	return h
 }
 
@@ -208,7 +211,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	connected := make(chan struct{})
 	agentStatuses := make(chan map[string]protocol.AgentStatus, 1)
 	go r.pollAgentStatuses(loop, h.AgentStatuses, agentStatuses)
-	go r.heartbeats(loop, stop, h, agentStatuses, connected)
+	toolStatuses := make(chan protocol.ToolStatus, 1)
+	if r.cfg.Commands["blender-mcp"] != "" {
+		go r.pollBlender(loop, toolStatuses)
+	}
+	go r.heartbeats(loop, stop, h, agentStatuses, toolStatuses, connected)
 	select {
 	case <-loop.Done():
 		return context.Cause(loop)
@@ -232,10 +239,15 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) heartbeats(ctx context.Context, stop context.CancelCauseFunc, heartbeat protocol.Heartbeat,
-	agentStatuses <-chan map[string]protocol.AgentStatus, connected chan struct{}) {
+	agentStatuses <-chan map[string]protocol.AgentStatus, toolStatuses <-chan protocol.ToolStatus, connected chan struct{}) {
 	for ctx.Err() == nil {
 		select {
 		case heartbeat.AgentStatuses = <-agentStatuses:
+		default:
+		}
+		select {
+		case status := <-toolStatuses:
+			heartbeat.Tools["blender"] = status
 		default:
 		}
 		r.updateProjects(&heartbeat)
