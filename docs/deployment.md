@@ -44,6 +44,10 @@ DeepSeek Harness 使用支持 `--profile headless` 的版本。使用 DeepSeek �
 
 ## 引擎适配
 
+Godot MCP 可选用 Coding-Solo 的 `@coding-solo/godot-mcp@0.1.1`。安装 Node.js 18+，在独立工具目录安装固定版本并关闭 npm 安装脚本，再创建一个可执行启动脚本来调用该包的 `build/index.js`。把脚本的绝对路径填入 Runner 的 `commands["godot-mcp"]`。Runner 使用同一份 `commands.godot` 探测 MCP。
+
+执行机器的 Godot 行显示连接状态。接通后，开发 Codex 可在本轮 Godot 工作区运行场景、读取调试输出并停止该会话。运行任务时，传给 MCP 的项目路径由 Runner 指定。
+
 工作流版本保存 `engine`。测试与导出步骤使用通用的 `engine` 执行方式，派单时解析为该版本选定的引擎。Runner 上报项目、引擎和 Git 工作区路径，项目引擎和工作流引擎一致时可派单。较早的工作流与 Runner 项目配置默认使用 Godot，`godot_dir` 仍可作为旧项目的目录字段。手动登记的项目使用 `engine` 和可选的 `engine_dir`。
 
 接入新引擎时，注册引擎及其 Runner 适配器。适配器负责探测本机 CLI、校验项目配置和目录、在指定 Git 提交上运行测试和构建。测试输出使用 `test` 事件交给 QA，构建产物通过通用的产物接口回传。Godot 已实现这套接口。Unreal Engine、Unity 和 Cocos 的工作流可以预先保存，需等待各自的适配器后才能派单。

@@ -11,6 +11,7 @@ ALTER TABLE machines ADD COLUMN IF NOT EXISTS project_engines jsonb NOT NULL DEF
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS project_workspaces jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS create_projects boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS agent_statuses jsonb NOT NULL DEFAULT '{}';
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS godot_mcp text NOT NULL DEFAULT '';
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS brief_chat boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS production_workflow boolean NOT NULL DEFAULT false;
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS workflow_review boolean NOT NULL DEFAULT false;

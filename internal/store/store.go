@@ -20,7 +20,7 @@ var schema string
 
 const leaseInterval = "interval '45 seconds'"
 const runColumns = "id, spec, status, lease, created, updated, started_at, finished_at, result, execution_id, step_id, attempt"
-const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review,can_check_agents"
+const machineColumns = "id,name,executors,projects,seen,project_engines,create_projects,agent_statuses,brief_chat,production_workflow,workflow_review,can_check_agents,godot_mcp"
 
 var ErrConflict = errors.New("run state or lease changed")
 
@@ -97,7 +97,7 @@ func (s *Store) AuthRunner(ctx context.Context, token string) (string, error) {
 
 func scanMachine(row pgx.Row) (protocol.Machine, error) {
 	var m protocol.Machine
-	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow, &m.WorkflowReview, &m.CanCheckAgents)
+	err := row.Scan(&m.ID, &m.Name, &m.Executors, &m.Projects, &m.Seen, &m.ProjectEngines, &m.CreateProjects, &m.AgentStatuses, &m.BriefChat, &m.ProductionWorkflow, &m.WorkflowReview, &m.CanCheckAgents, &m.GodotMCP)
 	return m, err
 }
 
@@ -140,8 +140,8 @@ func (s *Store) ProjectHeartbeat(ctx context.Context, id string, h protocol.Hear
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx, `UPDATE machines SET executors=$2,projects=$3,project_engines=$4,
-		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,workflow_review=$10,can_check_agents=$11,seen=now() WHERE id=$1`,
-		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow, h.WorkflowReview, h.CanCheckAgents); err != nil {
+		project_workspaces=$5,create_projects=$6,agent_statuses=$7,brief_chat=$8,production_workflow=$9,workflow_review=$10,can_check_agents=$11,godot_mcp=$12,seen=now() WHERE id=$1`,
+		id, h.Executors, h.Projects, h.ProjectEngines, h.ProjectWorkspaces, h.CreateProjects, h.AgentStatuses, h.BriefChat, h.ProductionWorkflow, h.WorkflowReview, h.CanCheckAgents, h.GodotMCP); err != nil {
 		return reply, err
 	}
 	if h.CreateProjects {

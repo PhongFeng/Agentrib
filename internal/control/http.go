@@ -283,6 +283,10 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 		problem(w, http.StatusBadRequest, "Invalid Agent statuses")
 		return
 	}
+	if h.GodotMCP != "" && h.GodotMCP != "ready" && h.GodotMCP != "unavailable" {
+		problem(w, http.StatusBadRequest, "Invalid Godot MCP status")
+		return
+	}
 	projects := make(map[string]bool, len(h.Projects))
 	for _, key := range h.Projects {
 		if !slugPattern.MatchString(key) {

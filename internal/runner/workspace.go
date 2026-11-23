@@ -160,6 +160,18 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 			backend = qoder
 		}
 	}
+	godotPrompt := ""
+	godot, isGodot := adapter.(godotEngine)
+	if codex, ok := backend.(Codex); ok && isGodot && r.godotMCP && !run.Spec.ReadOnly && !run.Spec.QAGate &&
+		!brief && (run.StepID == "develop" || run.Spec.Preflight) {
+		if options, err := godotMCPOptions(r.cfg.Commands["godot-mcp"], godot.command, dir); err == nil {
+			codex.mcpOptions = options
+			backend = codex
+			godotPrompt = "\nUse the agentrib_godot tools to run the current project or a specific scene, read its runtime output, and stop it when done."
+		} else {
+			emit("diagnostic", "Godot MCP: "+err.Error())
+		}
+	}
 	var finalReply string
 	if run.IsProductTriage() {
 		answer, err := r.finalAgentReply(ctx, backend, dir, run.Spec.Prompt, run.Spec.ReadOnly, protocol.MaxBriefBytes, emit)
@@ -179,7 +191,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		} else if run.Spec.QARework {
 			mode = "Review the exact CI revision in a disposable worktree. Temporary untracked test files are allowed. Do not modify tracked files or make commits."
 		}
-		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
+		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt + godotPrompt
 		if run.Spec.QAGate {
 			if run.Spec.WebBuild != nil {
 				browser, err := r.prepareQABrowser(ctx, *run.Spec.WebBuild)
@@ -194,7 +206,7 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 						if options, err := browser.codexTools(ctx); err != nil {
 							emit("diagnostic", "QA 浏览器工具不可用："+err.Error())
 						} else {
-							codex.browser = options
+							codex.mcpOptions = options
 							backend = codex
 							prompt += "\n使用 MCP 工具 agentrib_game_qa 的 game_browser 操作已启动的浏览器。先查看截图，再按坐标点击或发送按键，每次操作返回当前画面。"
 						}
