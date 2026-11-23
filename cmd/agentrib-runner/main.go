@@ -16,10 +16,17 @@ import (
 func main() {
 	path := flag.String("config", "runner.json", "Runner configuration path")
 	check := flag.Bool("check", false, "Report discovered executors and exit")
+	browserSocket := flag.String("qa-browser-mcp", "", "Connect stdio to the current QA browser (internal)")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *path, *check); err != nil && !errors.Is(err, context.Canceled) {
+	var err error
+	if *browserSocket != "" {
+		err = runner.ConnectBrowserTools(ctx, *browserSocket, os.Stdin, os.Stdout)
+	} else {
+		err = run(ctx, *path, *check)
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("runner stopped", "error", err)
 		os.Exit(1)
 	}

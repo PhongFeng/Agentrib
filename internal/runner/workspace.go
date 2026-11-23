@@ -181,6 +181,26 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 		}
 		prompt := "This is an Agentrib game task. Selected engine: " + engine.Name + ". " + mode + " Work independently. Do not delegate, push, or publish.\n\n" + run.Spec.Prompt
 		if run.Spec.QAGate {
+			if run.Spec.WebBuild != nil {
+				browser, err := r.prepareQABrowser(ctx, *run.Spec.WebBuild)
+				if err != nil {
+					emit("diagnostic", "QA 浏览器准备失败："+err.Error())
+					prompt += "\n\nRunner 未能准备 CI 原包的测试浏览器：" + err.Error() + "。根据实际证据报告网页验收状态。"
+				} else {
+					defer browser.Close()
+					emit("status", "Runner 已在测试浏览器启动原始 CI 网页包")
+					prompt += browser.evidence()
+					if codex, ok := backend.(Codex); ok {
+						if options, err := browser.codexTools(ctx); err != nil {
+							emit("diagnostic", "QA 浏览器工具不可用："+err.Error())
+						} else {
+							codex.browser = options
+							backend = codex
+							prompt += "\n使用 MCP 工具 agentrib_game_qa 的 game_browser 操作已启动的浏览器。先查看截图，再按坐标点击或发送按键，每次操作返回当前画面。"
+						}
+					}
+				}
+			}
 			prompt += "\n\n验收报告的首行必须单独写 QA: PASS 或 QA: FAIL。全部必要标准均有证据且通过时使用 QA: PASS。否则使用 QA: FAIL。正文写明每项结论与证据。"
 			if run.Spec.QARework {
 				prompt += qaReworkInstructions
@@ -321,7 +341,7 @@ func (g godotEngine) Build(ctx context.Context, dir, out string, project Project
 		}
 		checkErr = execGodot("--export-release", project.WebPreset, filepath.Join(web, "index.html"))
 		if checkErr == nil {
-			bundle := filepath.Join(out, "godot-web.zip")
+			bundle := filepath.Join(out, protocol.WebBuildArchive)
 			checkErr = zipExport(web, bundle)
 			if checkErr == nil {
 				files = append(files, bundle)

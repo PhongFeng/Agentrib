@@ -37,24 +37,30 @@ type Heartbeat struct {
 }
 
 type Spec struct {
-	MachineID    string   `json:"machine_id"`
-	Project      string   `json:"project"`
-	Engine       string   `json:"engine,omitempty"`
-	Executor     string   `json:"executor"`
-	Title        string   `json:"title"`
-	Prompt       string   `json:"prompt"`
-	Commit       string   `json:"commit,omitempty"`
-	ReadOnly     bool     `json:"read_only,omitempty"`
-	BriefMode    string   `json:"brief_mode,omitempty"`
-	AgentCheck   bool     `json:"agent_check,omitempty"`
-	MergeCommits []string `json:"merge_commits,omitempty"`
-	QAGate       bool     `json:"qa_gate,omitempty"`
-	ExportGame   bool     `json:"export_game,omitempty"`
-	QADispatch   string   `json:"qa_dispatch,omitempty"`
-	RepairOf     string   `json:"repair_of,omitempty"`
-	Preflight    bool     `json:"preflight,omitempty"`
-	QARework     bool     `json:"qa_rework,omitempty"`
-	RecheckOf    string   `json:"recheck_of,omitempty"`
+	MachineID    string    `json:"machine_id"`
+	Project      string    `json:"project"`
+	Engine       string    `json:"engine,omitempty"`
+	Executor     string    `json:"executor"`
+	Title        string    `json:"title"`
+	Prompt       string    `json:"prompt"`
+	Commit       string    `json:"commit,omitempty"`
+	ReadOnly     bool      `json:"read_only,omitempty"`
+	BriefMode    string    `json:"brief_mode,omitempty"`
+	AgentCheck   bool      `json:"agent_check,omitempty"`
+	MergeCommits []string  `json:"merge_commits,omitempty"`
+	QAGate       bool      `json:"qa_gate,omitempty"`
+	ExportGame   bool      `json:"export_game,omitempty"`
+	QADispatch   string    `json:"qa_dispatch,omitempty"`
+	RepairOf     string    `json:"repair_of,omitempty"`
+	Preflight    bool      `json:"preflight,omitempty"`
+	QARework     bool      `json:"qa_rework,omitempty"`
+	RecheckOf    string    `json:"recheck_of,omitempty"`
+	WebBuild     *WebBuild `json:"web_build,omitempty"`
+}
+
+type WebBuild struct {
+	RunID  string `json:"run_id"`
+	Digest string `json:"sha256"`
 }
 
 type Run struct {
@@ -85,6 +91,7 @@ type Artifact struct {
 }
 
 const (
+	WebBuildArchive       = "godot-web.zip"
 	PreviewArtifactPrefix = "preview-"
 	MaxPreviewArtifacts   = 48
 	MaxPreviewBytes       = 8 << 20

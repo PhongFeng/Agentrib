@@ -33,6 +33,7 @@ install -m 0755 "$binary" /opt/agentrib/bin/agentrib-server.new
 mv -f /opt/agentrib/bin/agentrib-server.new /opt/agentrib/bin/agentrib-server
 install -m 0644 "$deploy_dir/agentrib.service" /etc/systemd/system/agentrib.service
 install -D -m 0644 "$deploy_dir/nginx.conf" /etc/nginx/snippets/agentrib.conf
+install -D -m 0644 "$deploy_dir/nginx-play.conf" /etc/nginx/snippets/agentrib-play.conf
 systemctl daemon-reload
 systemctl enable agentrib.service
 systemctl restart agentrib.service

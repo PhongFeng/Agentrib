@@ -23,7 +23,10 @@ type Backend interface {
 	Execute(context.Context, string, string, bool, Emit) error
 }
 
-type Codex struct{ command string }
+type Codex struct {
+	command string
+	browser []string
+}
 type QoderCN struct {
 	command string
 	godot   string
@@ -51,6 +54,7 @@ func (c Codex) execute(ctx context.Context, directory, prompt string, readOnly b
 		mode = "read-only"
 	}
 	args := []string{"exec", "--json", "--ephemeral", "--color", "never", "-c", `approval_policy="never"`, "--sandbox", mode}
+	args = append(args, c.browser...)
 	args = append(args, options...)
 	cmd := command(ctx, directory, c.command, append(args, "-")...)
 	return stream(cmd, prompt, func(line string) { parseCodex(line, emit) }, emit)

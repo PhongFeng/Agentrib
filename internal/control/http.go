@@ -26,13 +26,16 @@ var (
 )
 
 type API struct {
-	store     *store.Store
-	operator  [32]byte
-	artifacts string
+	store      *store.Store
+	operator   [32]byte
+	artifacts  string
+	playHost   string
+	playOrigin string
 }
 
-func New(db *store.Store, operatorToken, artifacts string) http.Handler {
-	a := &API{store: db, operator: sha256.Sum256([]byte(operatorToken)), artifacts: artifacts}
+func New(db *store.Store, operatorToken, artifacts, playOrigin string) http.Handler {
+	a := &API{store: db, operator: sha256.Sum256([]byte(operatorToken)), artifacts: artifacts,
+		playHost: strings.TrimPrefix(playOrigin, "https://"), playOrigin: playOrigin}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /api/v1/machines", a.asOperator(a.machines))
@@ -49,6 +52,8 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", a.asOperator(a.cancel))
 	mux.HandleFunc("POST /api/v1/runs/{id}/artifacts/{name}", a.asOperator(a.authorizeDownload))
 	mux.HandleFunc("GET /api/v1/runs/{id}/artifacts/{name}", a.download)
+	mux.HandleFunc("POST /api/v1/runs/{id}/play", a.asOperator(a.authorizePlay))
+	mux.HandleFunc("GET /play/{id}/{grant}/{file...}", a.play)
 	mux.HandleFunc("GET /api/v1/workflows", a.asOperator(a.workflows))
 	mux.HandleFunc("GET /api/v1/agents", a.asOperator(func(w http.ResponseWriter, _ *http.Request) {
 		send(w, http.StatusOK, protocol.Agents)
@@ -69,7 +74,13 @@ func New(db *store.Store, operatorToken, artifacts string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runner/runs/{id}/start", a.asRunner(a.start))
 	mux.HandleFunc("POST /api/v1/runner/runs/{id}/report", a.asRunner(a.report))
 	mux.HandleFunc("PUT /api/v1/runner/runs/{id}/artifacts/{name}", a.asRunner(a.upload))
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.playHost != "" && strings.EqualFold(r.Host, a.playHost) && !strings.HasPrefix(r.URL.Path, "/play/") {
+			http.NotFound(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func send(w http.ResponseWriter, status int, value any) {

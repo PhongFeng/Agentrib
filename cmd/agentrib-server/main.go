@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,6 +29,13 @@ func run() error {
 	if database == "" || len(operator) < 32 {
 		return errors.New("set AGENTRIB_DATABASE_URL and a 32+ character AGENTRIB_OPERATOR_TOKEN")
 	}
+	playOrigin := strings.TrimRight(strings.TrimSpace(os.Getenv("AGENTRIB_PLAY_ORIGIN")), "/")
+	if playOrigin != "" {
+		u, err := url.Parse(playOrigin)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || playOrigin != "https://"+u.Host {
+			return errors.New("AGENTRIB_PLAY_ORIGIN must be a separate HTTPS origin")
+		}
+	}
 	addr := os.Getenv("AGENTRIB_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:8765"
@@ -48,7 +56,7 @@ func run() error {
 		return err
 	}
 	defer db.Close()
-	server := &http.Server{Addr: addr, Handler: control.New(db, operator, artifacts), ReadHeaderTimeout: 5 * time.Second,
+	server := &http.Server{Addr: addr, Handler: control.New(db, operator, artifacts, playOrigin), ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 32 << 10}
 	go sweep(ctx, db)
 	go func() {

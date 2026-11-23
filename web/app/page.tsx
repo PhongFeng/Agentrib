@@ -313,6 +313,19 @@ export default function Console() {
     setNotice('已交给浏览器下载，可在浏览器的下载列表里查看进度。');
   }
 
+  async function playBuild(id: string) {
+    const tab = window.open('about:blank', '_blank');
+    if (!tab) throw new Error('浏览器阻止了新标签页，请允许工作台打开新标签页。');
+    tab.opener = null;
+    try {
+      const { url } = await api<{ url: string }>(token, `/runs/${id}/play`, {});
+      tab.location.replace(url);
+    } catch (error) {
+      tab.close();
+      throw error;
+    }
+  }
+
   function updateStep(index: number, change: Partial<Step>) {
     setDraft(current => current && { ...current, steps: current.steps.map((step, i) => i === index ? { ...step, ...change } : step) });
   }
@@ -601,6 +614,7 @@ export default function Console() {
               {step.executor !== 'approval' && step.executor !== 'notify' && <RunTiming run={current} now={now} />}
               {qaBuild && <div className="qa-preview">
                 <button disabled={busy} onClick={() => void action(() => downloadArtifact(qaBuild.id, webBuild))}>下载 QA 试玩包</button>
+                <button className="preview-action" disabled={busy} onClick={() => void action(() => playBuild(qaBuild.id))}>打开游戏试玩</button>
                 <span>CI 构建 <code title={qaBuild.result?.commit}>{qaBuild.result?.commit?.slice(0, 7)}</code> · 测试版</span>
               </div>}
               {history.length > 0 && <details><summary>历史尝试</summary><div className="run-attempts">{history.map(previous => <div key={previous.id}>

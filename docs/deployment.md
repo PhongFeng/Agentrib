@@ -8,6 +8,8 @@
 4. 将 `deploy/agentrib.service` 安装为 systemd 服务并启动。Ubuntu 上也可以执行 `sudo bash deploy/install-linux.sh /absolute/path/agentrib-server` 完成账户、配置和服务安装。将 `web/out/` 的内容作为网站根目录下的 `console/` 发布，在 TLS 虚拟主机中包含 `deploy/nginx.conf`（安装脚本写到 `/etc/nginx/snippets/agentrib.conf`），执行 `nginx -t` 后重新加载。
 5. 检查 `/healthz` 返回 `{"status":"ok"}`，打开 `/console/` 以操作员令牌登录。
 
+在线试玩需要单独的 HTTPS 来源。将其完整地址配置到服务端 `AGENTRIB_PLAY_ORIGIN`，并只在该来源的 TLS 虚拟主机中包含 `deploy/nginx-play.conf`。工作台及其 API 通过原来的来源提供。生产环境在 `www.agentrib.com` 提供工作台，在 `agentrib.com/play/` 提供试玩。授权绑定到具体 CI 产物，有效期为两小时。
+
 ## Mac 执行机器
 
 1. 安装 Git 和项目所选的引擎。Godot 项目需要 Godot 4 和对应的 Web 导出模板。在执行机器上安装并登录工作流所用的 Agent CLI。Go Runner 可以在服务器用 `GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o agentrib-runner ./cmd/agentrib-runner` 构建。
@@ -19,6 +21,8 @@
 也可以在「发起制作」展开产品 Agent 对话，选择执行机器上支持只读执行的 Agent。Codex 可使用项目或执行机器上已安装的技能。发送需求并讨论后，点击「生成简报」，再点击「使用这份简报」填入工作流表单。
 
 默认游戏模板从制作人确认的简报开始。产品 Agent 将需求及分工写入 `docs/production/`。美术和音效分别接续产品 Agent 的提交，`develop` 等两边完成后合并它们的 Git 产出并接入资源。`ci` 运行引擎测试并生成试玩包。「运行记录」提供已提交的产品 Markdown、美术图片和音效预览。QA 提交通过结论后，交付通知会提供试玩包和验收报告入口。
+
+QA 卡片可以下载或在线打开同一份 CI 网页包。执行机器安装 Chrome 后，Runner 会在本机回环地址提供原始 ZIP 的内容，用临时 Chrome 会话检查能否启动，并把地址与启动截图交给 QA。使用 Codex 验收时，该次任务可直接获取画面、点击和发送游戏按键。工具只连接本次 CI 网页包。可在 Runner 的 `commands.chrome` 自定义浏览器路径。启动截图只验证网页启动，音效仍需实际试听。
 
 游戏工作流内由 Runner 执行的每个步骤上限为 12 小时。工作流外的任务仍为 20 分钟。达到上限后，工作台会在运行记录中标出「执行超时」。
 

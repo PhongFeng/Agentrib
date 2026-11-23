@@ -19,7 +19,7 @@ type cliBackend struct {
 func backendFor(agent protocol.Agent, path string) Backend {
 	switch agent.ID {
 	case "codex":
-		return Codex{path}
+		return Codex{command: path}
 	case "qoder-cn":
 		return QoderCN{command: path}
 	case "minimax-code":

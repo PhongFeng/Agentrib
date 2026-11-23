@@ -148,6 +148,7 @@ func planQA(e protocol.Execution, step protocol.Step, runs map[string]protocol.R
 			return p.state("product_review", "QA 仍报告已延期的检查，请产品补充说明后复验")
 		}
 		spec.Commit = ci.Result.Commit
+		spec.WebBuild = nil
 		spec.Prompt = workflowPrompt(step, e.Brief) + "\n复验下列未关闭缺陷及其余必要标准，记录原编号。\n" + bugEvidence(open) + "\n产品补充说明：\n" + decision.Note
 		if deferred.Len() > 0 {
 			spec.Prompt += "\n\n操作员已批准将下列检查从本轮必要验收范围中延期。仅对列出的检查免除本轮实测，继续验收其他要求。延期检查保留未验证，不能计入 verified 或作为本轮 FAIL 的唯一依据。\n" + deferred.String()

@@ -518,6 +518,10 @@ func appendBuildEvidence(ctx context.Context, tx pgx.Tx, spec *protocol.Spec, pr
 		spec.Prompt += "\nBuild artifacts:\n"
 		for _, artifact := range prior.Result.Artifacts {
 			spec.Prompt += fmt.Sprintf("- %s (%d bytes)\n", artifact.Name, artifact.Bytes)
+			if spec.QAGate && prior.Status == "succeeded" && engine.ID == protocol.DefaultEngine &&
+				prior.Result.Commit == spec.Commit && artifact.Name == protocol.WebBuildArchive {
+				spec.WebBuild = &protocol.WebBuild{RunID: prior.ID, Digest: artifact.Digest}
+			}
 		}
 	}
 	return nil
