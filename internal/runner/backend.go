@@ -30,8 +30,12 @@ type Codex struct {
 type QoderCN struct {
 	command string
 	godot   string
+	mcp     godotMCPServer
 }
-type MiniMaxCode struct{ command string }
+type MiniMaxCode struct {
+	command string
+	mcp     godotMCPServer
+}
 
 func (c Codex) Probe(ctx context.Context) error {
 	return command(ctx, "", c.command, "login", "status").Run()
@@ -75,6 +79,12 @@ func (q QoderCN) Execute(ctx context.Context, directory, prompt string, readOnly
 			allowed = append(allowed, "Bash("+engine+" --headless:*)")
 			prompt += "\nTo run Godot scripts, use `" + engine + " --headless --path . --script res://path/to/script.gd`."
 		}
+		if q.mcp.Command != "" {
+			args = append(args, "--mcp-config", q.mcp.qoderConfig())
+			prompt += godotMCPPrompt
+			const prefix = "mcp__" + godotMCPName + "__"
+			allowed = append(allowed, prefix+"get_godot_version", prefix+"run_project", prefix+"get_debug_output", prefix+"stop_project")
+		}
 		args = append(args, "--permission-mode", "accept_edits", "--allowed-tools", strings.Join(allowed, ","))
 	}
 	cmd := command(ctx, directory, q.command, args...)
@@ -91,9 +101,18 @@ func (q QoderCN) Execute(ctx context.Context, directory, prompt string, readOnly
 	return errors.Join(err, resultErr)
 }
 
-func (m MiniMaxCode) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) error {
+func (m MiniMaxCode) Execute(ctx context.Context, directory, prompt string, readOnly bool, emit Emit) (err error) {
 	if readOnly {
 		return errors.New("MiniMax Code does not support read-only Agentrib steps")
+	}
+	if m.mcp.Command != "" {
+		cleanup, setupErr := m.mcp.miniMaxConfig(directory)
+		if setupErr != nil {
+			emit("diagnostic", "Godot MCP: "+setupErr.Error())
+		} else {
+			defer func() { err = errors.Join(err, cleanup()) }()
+			prompt += godotMCPPrompt
+		}
 	}
 	input, err := json.Marshal(map[string]string{"prompt": prompt})
 	if err != nil {

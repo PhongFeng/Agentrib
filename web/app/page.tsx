@@ -8,7 +8,7 @@ import { isPreview, previewLabel, RunPreviewDialog, type Artifact } from './run-
 
 type AgentQuota = { label?: string; remaining: number; unit: string; window_minutes?: number; resets_at?: number };
 type AgentStatus = { account?: string; quotas?: AgentQuota[] };
-type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; can_check_agents?: boolean; godot_mcp?: 'ready' | 'unavailable'; seen: string };
+type Machine = { id: string; name: string; executors: string[]; agent_statuses?: Record<string, AgentStatus>; create_projects?: boolean; brief_chat?: boolean; production_workflow?: boolean; workflow_review?: boolean; can_check_agents?: boolean; godot_mcp?: 'ready' | 'unavailable'; godot_mcp_agents?: string[]; seen: string };
 type ProjectInput = { id: string; name: string; engine: string };
 type Project = ProjectInput & { workspace?: string; status: 'ready' | 'pending' | 'failed' | 'unavailable'; error?: string };
 type Engine = { id: string; name: string; implemented: boolean };
@@ -427,9 +427,11 @@ export default function Console() {
                 {machineEngines.length ? <ul className="machine-inventory">{machineEngines.map(engine => <li key={engine.id}>
                   <div className="line"><strong>{engine.name}</strong><span className="state good">CLI 已就绪</span></div>
                   {engine.id === 'godot' && <p>Godot MCP · {
-                    !machineOnline ? 'Runner 离线' : machine.godot_mcp === 'ready' ? '已接入 · 开发 Codex' :
+                    !machineOnline ? 'Runner 离线' : machine.godot_mcp === 'ready' ? '已接入' :
                       machine.godot_mcp === 'unavailable' ? '连接失败' : '未配置'
-                  }</p>}
+                  }{machineOnline && machine.godot_mcp === 'ready' && machine.godot_mcp_agents?.length
+                    ? ' · 开发 Agent ' + machine.godot_mcp_agents.map(executorName).join('、')
+                    : ''}</p>}
                 </li>)}</ul> : <p>暂无引擎记录</p>}
               </section>
             </div>

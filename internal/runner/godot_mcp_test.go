@@ -1,11 +1,41 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestMiniMaxGodotMCPLocalConfigIsRestored(t *testing.T) {
+	for _, original := range []string{"", "{\n  \"mcpServers\": {\"other\": {\"command\": \"tool\"}}\n}\n"} {
+		project := t.TempDir()
+		config := filepath.Join(project, ".mcp.json")
+		if original != "" {
+			if err := os.WriteFile(config, []byte(original), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		server := godotMCPServer{Command: "agentrib-runner", Args: []string{"-godot-project", project}}
+		cleanup, err := server.miniMaxConfig(project)
+		if err != nil {
+			t.Fatal(err)
+		}
+		during, err := os.ReadFile(config)
+		if err != nil || !bytes.Contains(during, []byte(godotMCPName)) ||
+			original != "" && !bytes.Contains(during, []byte(`"other"`)) {
+			t.Fatalf("temporary MCP config: %q, error: %v", during, err)
+		}
+		if err := cleanup(); err != nil {
+			t.Fatal(err)
+		}
+		restored, err := os.ReadFile(config)
+		if original == "" && !os.IsNotExist(err) || original != "" && (err != nil || string(restored) != original) {
+			t.Fatalf("original MCP config changed: %q, error: %v", restored, err)
+		}
+	}
+}
 
 func TestGodotMCPBindsProjectAndScene(t *testing.T) {
 	project := t.TempDir()

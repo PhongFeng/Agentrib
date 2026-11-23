@@ -22,18 +22,85 @@ const godotTools = `{"tools":[
  {"name":"stop_project","description":"Stop the Godot session started by this tool.","inputSchema":{"type":"object","additionalProperties":false}}
 ]}`
 
-func godotMCPOptions(tool, godot, dir string) ([]string, error) {
+const godotMCPName = "agentrib_godot"
+const godotMCPPrompt = "\nUse the agentrib_godot tools to run the current project or a specific scene, read its runtime output, and stop it when done."
+
+type godotMCPServer struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+func godotMCPForWorkspace(tool, godot, dir string) (godotMCPServer, error) {
 	exe, err := os.Executable()
 	if err != nil {
+		return godotMCPServer{}, err
+	}
+	return godotMCPServer{Command: exe, Args: []string{"-godot-mcp", tool, "-godot-engine", godot, "-godot-project", dir}}, nil
+}
+
+func (s godotMCPServer) codexOptions() []string {
+	args, _ := json.Marshal(s.Args)
+	const key = "mcp_servers." + godotMCPName + "."
+	return []string{"-c", key + "command=" + strconv.Quote(s.Command), "-c", key + "args=" + string(args),
+		"-c", key + `default_tools_approval_mode="approve"`}
+}
+
+func (s godotMCPServer) qoderConfig() string {
+	data, _ := json.Marshal(map[string]map[string]godotMCPServer{"mcpServers": {godotMCPName: s}})
+	return string(data)
+}
+
+func (s godotMCPServer) miniMaxConfig(dir string) (func() error, error) {
+	path := filepath.Join(dir, ".mcp.json")
+	document := map[string]json.RawMessage{}
+	servers := map[string]json.RawMessage{}
+	info, err := os.Lstat(path)
+	var original []byte
+	if err == nil {
+		if !info.Mode().IsRegular() || info.Size() > 512<<10 {
+			return nil, errors.New("unsupported project .mcp.json file")
+		}
+		original, err = os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(original, &document) != nil || document == nil {
+			return nil, errors.New("project .mcp.json is not a JSON object")
+		}
+		if raw := document["mcpServers"]; raw != nil && (json.Unmarshal(raw, &servers) != nil || servers == nil) {
+			return nil, errors.New("project .mcp.json has an invalid mcpServers object")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	args, err := json.Marshal([]string{"-godot-mcp", tool, "-godot-engine", godot, "-godot-project", dir})
+	servers[godotMCPName], _ = json.Marshal(s)
+	document["mcpServers"], _ = json.Marshal(servers)
+	data, _ := json.Marshal(document)
+	if err := writeMCPConfig(path, data, 0600); err != nil {
+		return nil, err
+	}
+	return func() error {
+		if info != nil {
+			return writeMCPConfig(path, original, info.Mode().Perm())
+		}
+		if err := os.Remove(path); !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}, nil
+}
+
+func writeMCPConfig(path string, data []byte, mode os.FileMode) error {
+	file, err := os.CreateTemp(filepath.Dir(path), ".agentrib-mcp-")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	const key = "mcp_servers.agentrib_godot."
-	return []string{"-c", key + "command=" + strconv.Quote(exe), "-c", key + "args=" + string(args),
-		"-c", key + `default_tools_approval_mode="approve"`}, nil
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	if err := errors.Join(writeErr, file.Chmod(mode), file.Close()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }
 
 type godotMCPClient struct {

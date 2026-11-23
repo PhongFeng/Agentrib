@@ -30,12 +30,12 @@ const (
 )
 
 type Runner struct {
-	cfg        Config
-	client     *http.Client
-	backends   map[string]Backend
-	engines    map[string]engineAdapter
-	agentPaths map[string]string
-	godotMCP   bool
+	cfg            Config
+	client         *http.Client
+	backends       map[string]Backend
+	engines        map[string]engineAdapter
+	agentPaths     map[string]string
+	godotMCPAgents map[string]bool
 }
 
 var errLease = errors.New("run lease no longer active")
@@ -97,7 +97,7 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 		}
 		r.engines[key] = adapter.create(path)
 	}
-	r.godotMCP = false
+	r.godotMCPAgents = make(map[string]bool)
 	if tool := r.cfg.Commands["godot-mcp"]; tool != "" {
 		h.GodotMCP = "unavailable"
 		if godot, ok := r.engines["godot"].(godotEngine); ok && godot.command != "" {
@@ -107,8 +107,13 @@ func (r *Runner) Detect(ctx context.Context) protocol.Heartbeat {
 			if err != nil {
 				slog.Info("Godot MCP probe failed", "error", err)
 			} else {
-				r.godotMCP = true
 				h.GodotMCP = "ready"
+				for _, key := range []string{"codex", "qoder-cn", "minimax-code"} {
+					if r.backends[key] != nil {
+						r.godotMCPAgents[key] = true
+						h.GodotMCPAgents = append(h.GodotMCPAgents, key)
+					}
+				}
 			}
 		}
 	}

@@ -15,6 +15,7 @@ type Machine struct {
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
 	GodotMCP           string                 `json:"godot_mcp,omitempty"`
+	GodotMCPAgents     []string               `json:"godot_mcp_agents,omitempty"`
 	Seen               time.Time              `json:"seen"`
 }
 
@@ -35,6 +36,7 @@ type Heartbeat struct {
 	WorkflowReview     bool                   `json:"workflow_review,omitempty"`
 	CanCheckAgents     bool                   `json:"can_check_agents,omitempty"`
 	GodotMCP           string                 `json:"godot_mcp,omitempty"`
+	GodotMCPAgents     []string               `json:"godot_mcp_agents,omitempty"`
 	ProjectResult      *ProjectResult         `json:"project_result,omitempty"`
 }
 

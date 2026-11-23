@@ -162,12 +162,20 @@ func (r *Runner) work(ctx context.Context, run protocol.Run, emit Emit) (protoco
 	}
 	godotPrompt := ""
 	godot, isGodot := adapter.(godotEngine)
-	if codex, ok := backend.(Codex); ok && isGodot && r.godotMCP && !run.Spec.ReadOnly && !run.Spec.QAGate &&
+	if isGodot && r.godotMCPAgents[run.Spec.Executor] && !run.Spec.ReadOnly && !run.Spec.QAGate &&
 		!brief && (run.StepID == "develop" || run.Spec.Preflight) {
-		if options, err := godotMCPOptions(r.cfg.Commands["godot-mcp"], godot.command, dir); err == nil {
-			codex.mcpOptions = options
-			backend = codex
-			godotPrompt = "\nUse the agentrib_godot tools to run the current project or a specific scene, read its runtime output, and stop it when done."
+		if session, err := godotMCPForWorkspace(r.cfg.Commands["godot-mcp"], godot.command, dir); err == nil {
+			switch agent := backend.(type) {
+			case Codex:
+				agent.mcpOptions = session.codexOptions()
+				backend, godotPrompt = agent, godotMCPPrompt
+			case QoderCN:
+				agent.mcp = session
+				backend = agent
+			case MiniMaxCode:
+				agent.mcp = session
+				backend = agent
+			}
 		} else {
 			emit("diagnostic", "Godot MCP: "+err.Error())
 		}

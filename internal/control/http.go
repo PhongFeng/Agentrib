@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -286,6 +287,15 @@ func (a *API) heartbeat(w http.ResponseWriter, r *http.Request, id string) {
 	if h.GodotMCP != "" && h.GodotMCP != "ready" && h.GodotMCP != "unavailable" {
 		problem(w, http.StatusBadRequest, "Invalid Godot MCP status")
 		return
+	}
+	mcpAgents := make(map[string]bool)
+	for _, key := range h.GodotMCPAgents {
+		_, known := protocol.FindAgent(key)
+		if h.GodotMCP != "ready" || !known || !slices.Contains(h.Executors, key) || mcpAgents[key] {
+			problem(w, http.StatusBadRequest, "Invalid Godot MCP agents")
+			return
+		}
+		mcpAgents[key] = true
 	}
 	projects := make(map[string]bool, len(h.Projects))
 	for _, key := range h.Projects {
