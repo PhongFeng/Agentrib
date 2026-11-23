@@ -599,7 +599,10 @@ export default function Console() {
               : '工作流已结束，未记录 QA 通过。'}</p>
             {(qaRun || exportRun) && <div className="actions">
               {qaRun && <button onClick={() => { if (qaRun.id !== runID) selectRun(qaRun.id); }}>查看 QA 报告</button>}
-              {exportRun && <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, webBuild))}>下载试玩包</button>}
+              {exportRun && <>
+                <button disabled={busy} onClick={() => void action(() => downloadArtifact(exportRun.id, webBuild))}>下载试玩包</button>
+                <button className="preview-action" disabled={busy} onClick={() => void action(() => playBuild(exportRun.id))}>打开游戏试玩</button>
+              </>}
             </div>}
           </div>}
           {execution?.workflow && <><details><summary>本次游戏简报</summary><pre>{execution.brief}</pre></details><ol className="timeline">{execution.workflow.steps.map(step => {
