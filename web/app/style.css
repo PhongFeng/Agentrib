@@ -77,6 +77,13 @@ main{padding-block:26px 70px}
 .login form{text-align:left}
 .login button{width:100%;margin-top:14px}
 
+.overview-heading{margin-bottom:20px}
+.overview-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.overview-stats h2{font-size:14px;color:var(--muted);margin-bottom:6px}
+.overview-stats strong{font-size:30px;font-variant-numeric:tabular-nums}
+.overview-stats small{font-size:14px;color:var(--muted);font-weight:500}
+.machine-inventory strong{overflow-wrap:anywhere}
+
 .console-tabs{display:inline-flex;gap:4px;padding:4px;margin-bottom:20px;background:var(--surface-2);border:1px solid var(--border);border-radius:11px}
 .console-tabs button{border:0;background:transparent;color:var(--muted);font-size:14px;font-weight:650;padding:8px 18px;border-radius:8px;white-space:nowrap;transition:background .16s,color .16s}
 .console-tabs button:hover{background:#18253c;color:var(--ink)}

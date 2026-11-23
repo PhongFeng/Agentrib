@@ -6,7 +6,7 @@
 2. 建立系统账户 `agentrib` 和由同名 PostgreSQL 角色拥有的数据库 `agentrib`。示例使用本机 Unix socket 和 peer 认证。
 3. 将二进制安装到 `/opt/agentrib/bin/agentrib-server`。建立仅 root 可读的 `/etc/agentrib/server.env`，设置 `AGENTRIB_DATABASE_URL=postgresql:///agentrib?host=/var/run/postgresql&user=agentrib` 和随机的 `AGENTRIB_OPERATOR_TOKEN`（至少 32 个字符）。
 4. 将 `deploy/agentrib.service` 安装为 systemd 服务并启动。Ubuntu 上也可以执行 `sudo bash deploy/install-linux.sh /absolute/path/agentrib-server` 完成账户、配置和服务安装。将 `web/out/` 的内容作为网站根目录下的 `console/` 发布，在 TLS 虚拟主机中包含 `deploy/nginx.conf`（安装脚本写到 `/etc/nginx/snippets/agentrib.conf`），执行 `nginx -t` 后重新加载。
-5. 检查 `/healthz` 返回 `{"status":"ok"}`，打开 `/console/` 以操作员令牌登录。
+5. 检查 `/healthz` 返回 `{"status":"ok"}`。打开 `/console/` 可直接查看只读概览。匿名接口 `GET /api/v1/public/overview` 公开机器在线数与总数、项目数，以及最近 10 条未归档制作的项目名称、创建时间和状态。简报、日志、工作区路径和产物仍需授权。点击「操作员登录」并输入令牌后即可进入制作工作台。
 
 在线试玩需要单独的 HTTPS 来源。将其完整地址配置到服务端 `AGENTRIB_PLAY_ORIGIN`，并只在该来源的 TLS 虚拟主机中包含 `deploy/nginx-play.conf`。工作台及其 API 通过原来的来源提供。生产环境在 `www.agentrib.com` 提供工作台，在 `agentrib.com/play/` 提供试玩。授权绑定到具体 CI 产物，有效期为两小时。
 

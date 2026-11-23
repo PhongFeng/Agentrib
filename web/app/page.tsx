@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { api, newID } from './api';
+import { PublicOverview } from './public-overview';
 import { QAReview, qaRoles, type Bug, type Ticket, type Review } from './qa-review';
 import { BriefChat, clearBriefChats } from './brief-chat';
 import { isPreview, previewLabel, RunPreviewDialog, type Artifact } from './run-previews';
@@ -119,6 +120,7 @@ function quotaText(quota: AgentQuota) {
 export default function Console() {
   const [token, setToken] = useState('');
   const [inputToken, setInputToken] = useState('');
+  const [showLogin, setShowLogin] = useState(false);
   const [notice, setNotice] = useState('');
   const [machines, setMachines] = useState<Machine[]>();
   const [engines, setEngines] = useState<Engine[]>([]);
@@ -251,11 +253,12 @@ export default function Console() {
     void action(async () => {
       await api<Machine[]>(key, '/machines');
       sessionStorage.setItem('agentrib.operator', key);
-      setInputToken(''); setToken(key);
+      setInputToken(''); setShowLogin(false); setToken(key);
     });
   }
 
   function logOut() {
+    setNotice('');
     sessionStorage.removeItem('agentrib.operator');
     clearBriefChats();
     setToken(''); setDraft(undefined); setMachines(undefined); setEngines([]); setAgents([]); setWorkflows([]); setAgentChecks([]);
@@ -366,10 +369,16 @@ export default function Console() {
   const now = Date.now();
 
   return <>
-    <header><div className="frame header"><a className="brand" href="/"><BrandMark height={20} /><span className="brand-name">Agent<span>rib</span></span></a><span className="header-sub">游戏制作控制台</span>{token && <button className="text-button" onClick={logOut}>退出</button>}</div></header>
+    <header><div className="frame header"><a className="brand" href="/"><BrandMark height={20} /><span className="brand-name">Agent<span>rib</span></span></a><span className="header-sub">游戏制作控制台</span>
+      {token ? <button className="text-button" onClick={logOut}>退出</button> :
+        <button className="text-button" disabled={busy} onClick={() => { setShowLogin(!showLogin); setInputToken(''); setNotice(''); }}>
+          {showLogin ? '返回只读概览' : '操作员登录'}
+        </button>}
+    </div></header>
     <main className="frame">
       {notice && <p className="notice" role="status">{notice}</p>}
-      {!token ? <section className="panel login">
+      {!token && !showLogin && <PublicOverview statusBadge={status => <span className={'state ' + tone(runStatus(status))}>{runStatus(status)}</span>} />}
+      {!token ? showLogin && <section className="panel login">
         <BrandMark height={34} />
         <h1>连接控制面</h1>
         <p className="login-sub">输入操作员令牌，接入工作室的研发流水线。</p>

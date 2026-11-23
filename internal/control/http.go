@@ -39,6 +39,7 @@ func New(db *store.Store, operatorToken, artifacts, playOrigin string) http.Hand
 		playHost: strings.TrimPrefix(playOrigin, "https://"), playOrigin: playOrigin}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("GET /api/v1/public/overview", a.publicOverview)
 	mux.HandleFunc("GET /api/v1/machines", a.asOperator(a.machines))
 	mux.HandleFunc("POST /api/v1/machines", a.asOperator(a.enroll))
 	mux.HandleFunc("GET /api/v1/machines/{id}/agent-checks", a.asOperator(a.agentChecks))
@@ -180,6 +181,11 @@ func (a *API) health(w http.ResponseWriter, r *http.Request) {
 func (a *API) machines(w http.ResponseWriter, r *http.Request) {
 	list, err := a.store.Machines(r.Context())
 	response(w, http.StatusOK, list, err)
+}
+
+func (a *API) publicOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := a.store.PublicOverview(r.Context())
+	response(w, http.StatusOK, overview, err)
 }
 
 func (a *API) enroll(w http.ResponseWriter, r *http.Request) {

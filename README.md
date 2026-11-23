@@ -2,7 +2,9 @@
 
 Agentrib 让人类与 AI Agent 按游戏工作室的分工协作。**人类担任制作人**，负责立项、确认需求和处理关键审批。产品、美术、音效、开发和 QA Agent 按工作流接续上游的 Git 提交，把简报变成可验收的游戏构建。
 
-[项目官网](https://www.agentrib.com/) · [Web 控制台](https://www.agentrib.com/console/) · [部署与验收说明](docs/deployment.md)
+[项目官网](https://www.agentrib.com/) · [控制台](https://www.agentrib.com/console/) · [部署与验收说明](docs/deployment.md)
+
+访客无需令牌即可查看执行机器在线数、项目数和近期制作记录。发起制作、审批和查看详细日志需要操作员令牌。
 
 ## 工作室路线图
 
