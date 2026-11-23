@@ -55,7 +55,8 @@ func (b *qaBrowser) codexTools(ctx context.Context) ([]string, error) {
 	}()
 	const prefix = "mcp_servers.agentrib_game_qa."
 	return []string{"-c", prefix + "command=" + strconv.Quote(exe),
-		"-c", prefix + "args=[\"-qa-browser-mcp\", " + strconv.Quote(socket) + "]"}, nil
+		"-c", prefix + "args=[\"-qa-browser-mcp\", " + strconv.Quote(socket) + "]",
+		"-c", prefix + `tools.game_browser.approval_mode="approve"`}, nil
 }
 
 func ConnectBrowserTools(ctx context.Context, socket string, in io.Reader, out io.Writer) error {

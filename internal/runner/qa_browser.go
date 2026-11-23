@@ -237,7 +237,8 @@ func (b *qaBrowser) capture(ctx context.Context, p *browserPipe) error {
 			}
 		}
 		err := p.call(attached.SessionID, "Runtime.evaluate", map[string]any{"expression": probe, "returnByValue": true}, &evaluated)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "Cannot find default execution context") &&
+			!strings.Contains(err.Error(), "Execution context was destroyed") {
 			return err
 		}
 		page := evaluated.Result.Value
