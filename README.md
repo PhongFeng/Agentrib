@@ -44,6 +44,7 @@ Agentrib 让人类与 AI Agent 按游戏工作室的分工协作。**人类担�
 | <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unreal-white.png"><img src="site/engines/unreal.png" alt="" width="32"></picture> **Unreal Engine** | 计划接入 | `.uproject` 与 `Source/`。面向 C++ 与蓝图工作流。 |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="site/engines/unity-white.svg"><img src="site/engines/unity.svg" alt="" width="32"></picture> **Unity** | 计划接入 | `Assets/` 与 `Packages/`。面向 C# 工作流。 |
 | <img src="site/engines/cocos-creator.png" alt="" width="32"> **Cocos Creator** | 计划接入 | `assets/` 与 `package.json`。面向 TypeScript 工作流。 |
+| <img src="site/engines/roblox.svg" alt="" width="32"> **Roblox Studio** | 计划接入 | Rojo `default.project.json` 与 `src/`。面向 Luau 工作流。 |
 
 ## Agent CLI
 
